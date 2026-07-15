@@ -1,0 +1,50 @@
+{
+  "observatory": {
+    "name": "Example Observatory",
+    "latitude_deg": 48.1372,
+    "longitude_deg": 11.5756,
+    "elevation_m": 519.0,
+    "timezone": "Europe/Berlin"
+  },
+
+  "cache_dir": "cache",
+  "ephemeris": "de421.bsp",
+
+  "celestrak": {
+    "groups": ["stations", "visual"],
+    "base_url": "https://celestrak.org/NORAD/elements/gp.php",
+    "max_age_days": 1.0,
+    "offline": false
+  },
+
+  "search": {
+    "max_separation_deg": 1.0,
+    "min_sun_altitude_deg": 5.0,
+    "min_satellite_altitude_deg": 10.0,
+    "coarse_step_seconds": 60.0,
+    "fine_step_seconds": 1.0,
+    "gate_factor": 3.0,
+    "refine_tolerance_seconds": 0.001,
+    "max_element_age_days": 14.0,
+    "path_samples": 15,
+    "satellite_sizes_m": {
+      "25544": [73.0, 109.0]
+    }
+  },
+
+  "sizes": {
+    "enabled": true,
+    "url": "https://planet4589.org/space/gcat/tsv/cat/satcat.tsv",
+    "max_age_days": 30.0
+  },
+
+  "output": {
+    "file": "transits.json",
+    "indent": 2,
+    "include_path": true
+  },
+
+  "gui": {
+    "theme": "dark"
+  }
+}

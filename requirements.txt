@@ -1,0 +1,12 @@
+# --- Search engine (python -m sattransit) -------------------------------------
+skyfield>=1.49
+numpy>=1.24
+
+# --- Viewer (python -m sattransit.gui) ----------------------------------------
+# Only needed for the GUI; the search runs without it.
+PyQt6>=6.6
+
+# --- Optional -----------------------------------------------------------------
+# macOS only: enables the dark window title bar in the GUI. The GUI works
+# without it (it degrades silently), so leave commented unless on macOS.
+# pyobjc-framework-Cocoa>=10.0
