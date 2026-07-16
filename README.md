@@ -201,6 +201,8 @@ everything else has defaults.
 | `search.path_samples` | Number of samples in each event's `path` array |
 | `search.satellite_sizes_m` | Overrides for the size catalogue. Key: a NORAD id or a name glob (`STARLINK-*`). Value: one number, or `[min, max]` metres |
 | `sizes.enabled` | Look up physical dimensions at all (default true) |
+| `spacetrack.enabled` | Add the LEO rocket bodies CelesTrak has no group for. Needs an account; see *Rocket bodies from Space-Track* |
+| `spacetrack.max_age_days`, `spacetrack.min_mean_motion` | When to refresh, and the low-orbit cut (11.25 rev/day ≈ a 128 min period) |
 | `sizes.url`, `sizes.max_age_days` | Where the size catalogue comes from, and when to refresh it |
 | `favorites.file` | List used by `--favorites` when no file is given |
 | `output.file`, `output.indent`, `output.include_path` | Output file, JSON indentation, whether to emit `path` |
@@ -250,9 +252,41 @@ and 469 payloads. The groups are payload-oriented — there is no rocket-body
 group, and no query for the whole catalogue. The gap is mostly classified
 `USA …` payloads (the 29 m ones are Starshield, on the Starlink v2-mini bus;
 the `military` group holds only 24 objects), spent stages such as CZ-4C, CZ-6A
-and Delta, and dead Globalstar, Iridium and Cosmos satellites. Reaching them
-means [Space-Track](https://www.space-track.org/), which serves the full
-catalogue but wants an account.
+and Delta, and dead Globalstar, Iridium and Cosmos satellites.
+
+Half of that gap can be closed — see below.
+
+### Rocket bodies from Space-Track
+
+`spacetrack.enabled` adds the **879 LEO rocket bodies** CelesTrak has no group
+for, 212 of them 5 m or larger. They are worth the trouble: a CZ-2F second
+stage is 15.5 m at a 340 km perigee, about **9″**, where a Starlink v2-mini
+gives roughly 4″. There are 46 CZ-4C, 24 CZ-6A, 21 CZ-2C and 32 Delta stages
+among them. It is one query for ~900 objects, some 6% more search time.
+
+It needs a free account at [Space-Track](https://www.space-track.org/), which
+authenticates with the account password — there are no API tokens. The
+credentials are therefore read from the environment and never from the
+configuration file:
+
+```bash
+export SPACETRACK_IDENTITY='you@example.org'
+export SPACETRACK_PASSWORD='...'
+python -m sattransit --start now --duration 12h
+```
+
+Their throttle is 30 requests a minute, 300 an hour, and GP queries once an
+hour, so the cache is not refreshed more often than that however low
+`spacetrack.max_age_days` is set. Their user agreement restricts passing the
+data on: the cache lives under `cache/`, which is not in the repository, and
+anything published from it needs the usual citation.
+
+**Only rocket bodies are fetched, and deliberately so.** Space-Track also
+carries about 9 800 LEO debris fragments, but their median span is under a
+metre — 0.077″ at 800 km, against ~4″ for a Starlink — and only 7 reach 5 m.
+They would nearly double every search for objects too small to photograph, and
+a fragment's high area-to-mass ratio makes its elements go off quickly, so the
+prediction would not be worth acting on.
 
 ### Why OMM rather than TLE
 
@@ -384,7 +418,9 @@ events whose true path might still land on the disk are reported as near misses.
 
 ## Credits
 
-- Orbital elements: [CelesTrak](https://celestrak.org/) (T.S. Kelso).
+- Orbital elements: [CelesTrak](https://celestrak.org/) (T.S. Kelso), and
+  optionally [Space-Track](https://www.space-track.org/) for rocket bodies,
+  whose user agreement asks that the data not be passed on further.
 - Satellite dimensions: GCAT (J. McDowell, `planet4589.org/space/gcat`),
   used under **CC-BY-4.0**. Each result file repeats this in its `attribution`
   field; keep the citation if you publish anything derived from it.

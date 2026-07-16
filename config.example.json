@@ -38,6 +38,13 @@
     "max_age_days": 30.0
   },
 
+  "spacetrack": {
+    "enabled": false,
+    "base_url": "https://www.space-track.org",
+    "max_age_days": 1.0,
+    "min_mean_motion": 11.25
+  },
+
   "favorites": {
     "file": "favorites.json"
   },

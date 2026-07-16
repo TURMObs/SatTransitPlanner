@@ -80,6 +80,21 @@ class SizesConfig:
 
 
 @dataclass
+class SpaceTrackConfig:
+    """Extra elements for the LEO rocket bodies CelesTrak has no group for.
+
+    Off unless asked for: it needs an account. The credentials come from the
+    environment, never from here.
+    """
+
+    enabled: bool = False
+    base_url: str = "https://www.space-track.org"
+    max_age_days: float = 1.0
+    # Above 11.25 revolutions a day is a period under ~128 min: low Earth orbit.
+    min_mean_motion: float = 11.25
+
+
+@dataclass
 class FavoritesConfig:
     file: str = "favorites.json"
 
@@ -95,6 +110,7 @@ class Config:
     celestrak: CelestrakConfig
     search: SearchConfig = field(default_factory=SearchConfig)
     sizes: SizesConfig = field(default_factory=SizesConfig)
+    spacetrack: SpaceTrackConfig = field(default_factory=SpaceTrackConfig)
     favorites: FavoritesConfig = field(default_factory=FavoritesConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
     gui: GuiConfig = field(default_factory=GuiConfig)
@@ -166,8 +182,8 @@ def load_config(path: str | Path) -> Config:
         raise ConfigError(f"{path}: top level must be a JSON object")
 
     known_top = {
-        "observatory", "celestrak", "search", "sizes", "favorites", "output", "gui",
-        "cache_dir", "ephemeris",
+        "observatory", "celestrak", "search", "sizes", "spacetrack", "favorites", "output",
+        "gui", "cache_dir", "ephemeris",
     }
     unknown = set(raw) - known_top
     if unknown:
@@ -185,6 +201,7 @@ def load_config(path: str | Path) -> Config:
         celestrak=_build(CelestrakConfig, raw["celestrak"], "celestrak"),
         search=_build(SearchConfig, raw.get("search", {}), "search"),
         sizes=_build(SizesConfig, raw.get("sizes", {}), "sizes"),
+        spacetrack=_build(SpaceTrackConfig, raw.get("spacetrack", {}), "spacetrack"),
         favorites=_build(FavoritesConfig, raw.get("favorites", {}), "favorites"),
         output=_build(OutputConfig, raw.get("output", {}), "output"),
         gui=_build(GuiConfig, raw.get("gui", {}), "gui"),
@@ -231,6 +248,11 @@ def _validate(config: Config) -> None:
 
     if config.sizes.max_age_days <= 0:
         raise ConfigError("sizes.max_age_days: must be positive")
+
+    if config.spacetrack.max_age_days <= 0:
+        raise ConfigError("spacetrack.max_age_days: must be positive")
+    if config.spacetrack.min_mean_motion <= 0:
+        raise ConfigError("spacetrack.min_mean_motion: must be positive")
 
     if config.gui.theme not in ("dark", "light"):
         raise ConfigError(f"gui.theme: must be 'dark' or 'light', not {config.gui.theme!r}")

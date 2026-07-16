@@ -15,6 +15,7 @@ from .config import DEFAULT_CONFIG_FILE, ConfigError, load_config
 from .finder import TransitFinder
 from .report import build_report
 from .sizes import SizeError, load_catalogue
+from .spacetrack import SpaceTrackError, load_rocket_bodies, merge
 from .timeutil import TimeError, resolve_window
 from .elements import ElementsError, load_catalog
 from .favorites import FavoritesError, build_favorites, load_favorites, write_favorites
@@ -138,6 +139,23 @@ def main(argv: list[str] | None = None) -> int:
             force_refresh=args.refresh,
             log=log,
         )
+        if config.spacetrack.enabled:
+            extra, source, stale = load_rocket_bodies(
+                config.spacetrack,
+                cache,
+                timescale,
+                reference=reference,
+                max_element_age_days=config.search.max_element_age_days,
+                offline=config.celestrak.offline,
+                force_refresh=args.refresh,
+                log=log,
+            )
+            added = merge(catalog.entries, extra)
+            catalog.sources.append(source)
+            catalog.stale_ids = sorted(set(catalog.stale_ids) | set(stale))
+            catalog.skipped_stale += len(stale)
+            log(f"              {added} rocket bodies CelesTrak does not carry")
+
         ephemeris = None if making else loader(config.ephemeris)
         sizes = {}
         if config.sizes.enabled:
@@ -153,7 +171,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.favorites and not making:
             path = config.resolve_favorites(None if args.favorites is True else args.favorites)
             favorites = load_favorites(path)
-    except (ElementsError, SizeError, FavoritesError) as exc:
+    except (ElementsError, SizeError, FavoritesError, SpaceTrackError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 3
     except OSError as exc:

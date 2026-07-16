@@ -13,6 +13,8 @@ config*.json
 !config.example.json
 transits.json
 
-# Downloaded orbital elements (OMM JSON), size catalogue and ephemerides
+# Downloaded orbital elements (OMM JSON), size catalogue and ephemerides.
+# Space-Track's user agreement restricts passing its data on, so this must not
+# be committed.
 cache/
 *.bsp
