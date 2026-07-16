@@ -38,6 +38,10 @@
     "max_age_days": 30.0
   },
 
+  "favorites": {
+    "file": "favorites.json"
+  },
+
   "output": {
     "file": "transits.json",
     "indent": 2,

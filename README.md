@@ -19,6 +19,7 @@ sattransit/        the package
   config.py report.py timeutil.py
 transit_gui.py     wrapper -> viewer, without -m
 config.example.json  template for your site configuration
+favorites.json     a ready-made list of large satellites to search
 tests/             the test suite (no network, no display)
 ```
 
@@ -57,6 +58,59 @@ local time                     type         satellite                     size  
 
 Other options: `--refresh` forces a re-download of the catalogues, `--offline`
 works from the cache and never uses the network, `-q` silences progress output.
+
+## Favourites
+
+Searching every active satellite over a week takes minutes. `--favorites`
+searches only a listed few, which takes seconds:
+
+```bash
+python -m sattransit -c config.json --start now --duration 7d --favorites
+python -m sattransit -c config.json --start now --duration 7d --favorites mine.json
+```
+
+Without a file it uses `favorites.file` from the config. The shipped
+`favorites.json` holds the 60 largest distinct objects in low Earth orbit —
+the CSS and ISS, Envisat, Sentinel-1, Aqua, Metop, Radarsat, some big rocket
+bodies. It is ordinary JSON, meant to be edited:
+
+```json
+{
+  "name": "My targets",
+  "satellites": [
+    {"norad_id": 25544, "name": "ISS (ZARYA)"},
+    {"norad_id": 48274, "name": "CSS (TIANHE)"}
+  ]
+}
+```
+
+A bare `[25544, 48274]` works too; only the ids are read, the rest is there to
+make the file readable.
+
+Elements still come from the configured `celestrak.groups`, so a favourite none
+of those groups carries cannot be searched. Rather than pass over it, the run
+says which ids were missed and whether they were absent or merely had stale
+elements, and the result file records the same under `catalog.favorites`.
+
+### How favorites.json was chosen
+
+From GCAT: the largest span, in orbits below 2000 km, among objects CelesTrak
+still tracks, one entry per satellite family. Three things had to be excluded
+for the list to mean anything:
+
+- **Tethers and wire antennas.** The largest spans in GCAT are things like
+  TSS-1R at 19 695 m — a 20 km tether — and RAE 1's 228 m of wire booms. They
+  have a span but no silhouette, so shapes naming a tether, antenna or boom are
+  left out.
+- **Everything above 2000 km.** A 100 m satellite in geostationary orbit
+  subtends less than an arcsecond.
+- **Repeats.** Taken literally, the largest fifty objects are mostly identical
+  29 m Starlink v2-minis. One entry per family keeps the list varied; a full
+  search finds the rest anyway.
+
+Assembled stations are catalogued once per module, so the list carries the id
+people actually track — 25544 for the ISS, 48274 for the CSS — and not its
+siblings, which would otherwise transit at the same moment as duplicates.
 
 ## Viewing the results
 
@@ -122,6 +176,7 @@ everything else has defaults.
 | `search.satellite_sizes_m` | Overrides for the size catalogue. Key: a NORAD id or a name glob (`STARLINK-*`). Value: one number, or `[min, max]` metres |
 | `sizes.enabled` | Look up physical dimensions at all (default true) |
 | `sizes.url`, `sizes.max_age_days` | Where the size catalogue comes from, and when to refresh it |
+| `favorites.file` | List used by `--favorites` when no file is given |
 | `output.file`, `output.indent`, `output.include_path` | Output file, JSON indentation, whether to emit `path` |
 | `gui.theme` | Viewer theme: `dark` (default) or `light` |
 

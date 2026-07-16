@@ -77,6 +77,11 @@ class SizesConfig:
 
 
 @dataclass
+class FavoritesConfig:
+    file: str = "favorites.json"
+
+
+@dataclass
 class GuiConfig:
     theme: str = "dark"
 
@@ -87,6 +92,7 @@ class Config:
     celestrak: CelestrakConfig
     search: SearchConfig = field(default_factory=SearchConfig)
     sizes: SizesConfig = field(default_factory=SizesConfig)
+    favorites: FavoritesConfig = field(default_factory=FavoritesConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
     gui: GuiConfig = field(default_factory=GuiConfig)
     cache_dir: str = "cache"
@@ -97,6 +103,13 @@ class Config:
     def cache_path(self) -> Path:
         path = Path(self.cache_dir).expanduser()
         if not path.is_absolute() and self.source_path is not None:
+            path = self.source_path.parent / path
+        return path
+
+    def resolve_favorites(self, override: str | None) -> Path:
+        """Where the favourites live: the override, else the configured file."""
+        path = Path(override if override else self.favorites.file).expanduser()
+        if not path.is_absolute() and override is None and self.source_path is not None:
             path = self.source_path.parent / path
         return path
 
@@ -147,7 +160,8 @@ def load_config(path: str | Path) -> Config:
         raise ConfigError(f"{path}: top level must be a JSON object")
 
     known_top = {
-        "observatory", "celestrak", "search", "sizes", "output", "gui", "cache_dir", "ephemeris",
+        "observatory", "celestrak", "search", "sizes", "favorites", "output", "gui",
+        "cache_dir", "ephemeris",
     }
     unknown = set(raw) - known_top
     if unknown:
@@ -165,6 +179,7 @@ def load_config(path: str | Path) -> Config:
         celestrak=_build(CelestrakConfig, raw["celestrak"], "celestrak"),
         search=_build(SearchConfig, raw.get("search", {}), "search"),
         sizes=_build(SizesConfig, raw.get("sizes", {}), "sizes"),
+        favorites=_build(FavoritesConfig, raw.get("favorites", {}), "favorites"),
         output=_build(OutputConfig, raw.get("output", {}), "output"),
         gui=_build(GuiConfig, raw.get("gui", {}), "gui"),
         cache_dir=raw.get("cache_dir", "cache"),

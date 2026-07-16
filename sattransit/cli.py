@@ -16,6 +16,7 @@ from .report import build_report
 from .sizes import SizeError, load_catalogue
 from .timeutil import TimeError, resolve_window
 from .elements import ElementsError, load_catalog
+from .favorites import FavoritesError, load_favorites
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -28,6 +29,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  sattransit -c config.json --start 2026-07-16T05:00 --duration 12h\n"
             "  sattransit -c config.json --start now --duration 2d -o today.json\n"
             "  sattransit -c config.json --start 2026-07-16T05:00 --end 2026-07-16T20:00\n"
+            "  sattransit -c config.json --start now --duration 7d --favorites\n"
         ),
     )
     parser.add_argument("-c", "--config", required=True, help="path to the JSON configuration file")
@@ -41,6 +43,14 @@ def build_parser() -> argparse.ArgumentParser:
     group.add_argument("--end", help="end of the observation window (ISO 8601)")
     group.add_argument("--duration", help="length of the window, e.g. 12h, 90min, 2d")
 
+    parser.add_argument(
+        "--favorites",
+        nargs="?",
+        const=True,
+        metavar="FILE",
+        help="search only the satellites listed in a favourites file, instead of every "
+        "satellite in the configured groups; without FILE, uses favorites.file from the config",
+    )
     parser.add_argument("-o", "--output", help="output file (overrides output.file in the config)")
     parser.add_argument(
         "--refresh",
@@ -111,19 +121,61 @@ def main(argv: list[str] | None = None) -> int:
                 force_refresh=args.refresh,
                 log=log,
             )
-    except (ElementsError, SizeError) as exc:
+        favorites = None
+        if args.favorites:
+            path = config.resolve_favorites(None if args.favorites is True else args.favorites)
+            favorites = load_favorites(path)
+    except (ElementsError, SizeError, FavoritesError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 3
     except OSError as exc:
         print(f"error: could not load ephemeris {config.ephemeris!r}: {exc}", file=sys.stderr)
         return 3
 
+    missing: list[int] = []
+    if favorites is not None:
+        wanted = set(favorites.norad_ids)
+        found = {e.norad_id for e in catalog.entries}
+        missing = sorted(wanted - found)
+        catalog.entries = [e for e in catalog.entries if e.norad_id in wanted]
+        label = favorites.name or favorites.path.name
+        log(f"Favourites  : {label} — {len(catalog.entries)} of {len(wanted)} found")
+        if missing:
+            # A favourite is only searchable if one of the configured groups
+            # carries usable elements for it. Silently dropping it would look
+            # like the satellite simply had no transits, so say which reason
+            # applies: too old is a different problem from not carried at all.
+            stale = [n for n in missing if n in set(catalog.stale_ids)]
+            absent = [n for n in missing if n not in set(catalog.stale_ids)]
+            if absent:
+                shown = ", ".join(str(n) for n in absent[:8])
+                more = f" and {len(absent) - 8} more" if len(absent) > 8 else ""
+                log(f"              {len(absent)} not in the configured groups: {shown}{more}")
+                log(f"              {_group_advice(config)}")
+            if stale:
+                shown = ", ".join(str(n) for n in stale[:8])
+                more = f" and {len(stale) - 8} more" if len(stale) > 8 else ""
+                log(
+                    f"              {len(stale)} with elements older than "
+                    f"{config.search.max_element_age_days} d: {shown}{more}"
+                )
+        if not catalog.entries:
+            print(
+                f"error: none of the {len(wanted)} favourites are in the configured groups "
+                f"({', '.join(config.celestrak.groups)}).\n"
+                f"  {_group_advice(config)}",
+                file=sys.stderr,
+            )
+            return 3
+
+    # The stale count covers the whole catalogue, so it would only confuse when
+    # the search has been narrowed to favourites; those are reported above.
     log(
         f"Satellites  : {len(catalog.entries)} searched"
         + (
             f", {catalog.skipped_stale} skipped (elements older than "
             f"{config.search.max_element_age_days} d)"
-            if catalog.skipped_stale
+            if catalog.skipped_stale and favorites is None
             else ""
         )
     )
@@ -139,7 +191,7 @@ def main(argv: list[str] | None = None) -> int:
         print(file=sys.stderr)
 
     runtime = time.monotonic() - started
-    report = build_report(config, catalog, events, start_dt, end_dt, runtime)
+    report = build_report(config, catalog, events, start_dt, end_dt, runtime, favorites, missing)
 
     output = config.resolve_output(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -156,6 +208,17 @@ def main(argv: list[str] | None = None) -> int:
     if not args.quiet:
         _print_summary(report)
     return 0
+
+
+def _group_advice(config) -> str:
+    """What to try when a favourite has no elements.
+
+    Telling someone to add a group they already have would send them chasing
+    the wrong problem: by then the id itself is the likely culprit.
+    """
+    if "active" not in config.celestrak.groups:
+        return 'add a broader group (e.g. "active") to celestrak.groups'
+    return "check the NORAD ids; CelesTrak carries no elements for these"
 
 
 def _progress(quiet: bool):

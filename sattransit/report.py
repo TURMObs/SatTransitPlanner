@@ -10,6 +10,7 @@ from . import __version__
 from .config import Config
 from .finder import Event
 from .elements import Catalog
+from .favorites import Favorites
 from .sizes import GCAT_CITATION
 
 
@@ -32,6 +33,8 @@ def build_report(
     start: datetime,
     end: datetime,
     runtime_seconds: float,
+    favorites: Favorites | None = None,
+    missing_favorites: list[int] | None = None,
 ) -> dict:
     tz = config.observatory.zoneinfo()
     transits = [e for e in events if e.is_transit]
@@ -73,6 +76,23 @@ def build_report(
             "satellites_searched": len(catalog.entries),
             "satellites_skipped_stale_elements": catalog.skipped_stale,
             "format": "omm-json",
+            "favorites": (
+                None
+                if favorites is None
+                else {
+                    "file": str(favorites.path),
+                    "name": favorites.name,
+                    "requested": len(favorites.norad_ids),
+                    "searched": len(catalog.entries),
+                    # Favourites that could not be searched, and why.
+                    "not_in_groups": [
+                        n for n in (missing_favorites or []) if n not in set(catalog.stale_ids)
+                    ],
+                    "stale_elements": [
+                        n for n in (missing_favorites or []) if n in set(catalog.stale_ids)
+                    ],
+                }
+            ),
             "sources": [
                 {
                     "group": source.group,

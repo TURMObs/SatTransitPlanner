@@ -1,0 +1,370 @@
+{
+  "name": "Largest 60 distinct objects in low Earth orbit",
+  "description": "Generated from GCAT: the largest span among objects CelesTrak still tracks, in orbits below 2000 km, one per satellite family. Shapes whose span comes from a tether or wire antenna are excluded, having no silhouette. max_m is GCAT's span in metres and is informational; the search reads sizes from the size catalogue and search.satellite_sizes_m. Edit freely.",
+  "source": "GCAT (J. McDowell, planet4589.org/space/gcat), CC-BY-4.0",
+  "generated_utc": "2026-07-16T19:03:37Z",
+  "satellites": [
+    {
+      "norad_id": 68495,
+      "name": "GRAVITAS",
+      "max_m": 40.0,
+      "shape": "Box + 2 pan"
+    },
+    {
+      "norad_id": 48274,
+      "name": "CSS (TIANHE)",
+      "max_m": 30.0,
+      "shape": "Step Cyl + 2 Pan",
+      "note": "assembled station; GCAT's entry is the Tianhe core module alone"
+    },
+    {
+      "norad_id": 55239,
+      "name": "APSTAR-6E",
+      "max_m": 30.0,
+      "shape": "Box+ 2 pan"
+    },
+    {
+      "norad_id": 56287,
+      "name": "STARLINK-30107",
+      "max_m": 29.0,
+      "shape": "Box + pan"
+    },
+    {
+      "norad_id": 62756,
+      "name": "USA 485",
+      "max_m": 29.0,
+      "shape": "Box + pan"
+    },
+    {
+      "norad_id": 27597,
+      "name": "MIDORI II (ADEOS-II)",
+      "max_m": 28.0,
+      "shape": "Irr + Pan"
+    },
+    {
+      "norad_id": 28931,
+      "name": "ALOS (DAICHI)",
+      "max_m": 28.0,
+      "shape": "Box + 2 Pan"
+    },
+    {
+      "norad_id": 27386,
+      "name": "ENVISAT",
+      "max_m": 26.0,
+      "shape": "Box + Pan"
+    },
+    {
+      "norad_id": 25544,
+      "name": "ISS (ZARYA)",
+      "max_m": 23.9,
+      "shape": "Cyl + 2 Pan",
+      "note": "assembled station; GCAT's entry is the Zarya module alone"
+    },
+    {
+      "norad_id": 39634,
+      "name": "SENTINEL-1A",
+      "max_m": 21.04,
+      "shape": "Box + 4 pan"
+    },
+    {
+      "norad_id": 69972,
+      "name": "CHUANG XIN 26 (CX-26)",
+      "max_m": 20.0,
+      "shape": "Box + 2 pan"
+    },
+    {
+      "norad_id": 69974,
+      "name": "CZ-10B R/B",
+      "max_m": 20.0,
+      "shape": "Cyl"
+    },
+    {
+      "norad_id": 59908,
+      "name": "EARTHCARE",
+      "max_m": 18.5,
+      "shape": "Box+dsh+pan"
+    },
+    {
+      "norad_id": 38771,
+      "name": "METOP-B",
+      "max_m": 17.6,
+      "shape": "Box + panel"
+    },
+    {
+      "norad_id": 43689,
+      "name": "METOP-C",
+      "max_m": 17.6,
+      "shape": "Box + panel"
+    },
+    {
+      "norad_id": 38337,
+      "name": "GCOM-W1 (SHIZUKU)",
+      "max_m": 17.5,
+      "shape": "Box +2 pan + dish"
+    },
+    {
+      "norad_id": 28376,
+      "name": "AURA",
+      "max_m": 17.4,
+      "shape": "Box + Pan"
+    },
+    {
+      "norad_id": 27424,
+      "name": "AQUA",
+      "max_m": 17.0,
+      "shape": "Box + Pan"
+    },
+    {
+      "norad_id": 69180,
+      "name": "SHENZHOU-23 (SZ-23)",
+      "max_m": 17.0,
+      "shape": "Cyl + 2 pan"
+    },
+    {
+      "norad_id": 43065,
+      "name": "GCOM-C (SHIKISAI)",
+      "max_m": 16.5,
+      "shape": "Box +2 pan + dish"
+    },
+    {
+      "norad_id": 43672,
+      "name": "GOSAT 2 (IBUKI 1)",
+      "max_m": 16.5,
+      "shape": "Box + 2 Pan"
+    },
+    {
+      "norad_id": 64694,
+      "name": "GOSAT-GW (IBUKI GW)",
+      "max_m": 16.5,
+      "shape": "Box + 2 Pan"
+    },
+    {
+      "norad_id": 32382,
+      "name": "RADARSAT-2",
+      "max_m": 15.0,
+      "shape": "Box + 2 Pan"
+    },
+    {
+      "norad_id": 47231,
+      "name": "GAOFEN-14 01",
+      "max_m": 15.0,
+      "shape": "Box + 2 Pan"
+    },
+    {
+      "norad_id": 67232,
+      "name": "SPACEMOBILE-006",
+      "max_m": 15.0,
+      "shape": "Cyl + 2 pan + plate"
+    },
+    {
+      "norad_id": 40069,
+      "name": "METEOR-M 2",
+      "max_m": 14.0,
+      "shape": "Cyl+panels"
+    },
+    {
+      "norad_id": 44387,
+      "name": "METEOR-M2 2",
+      "max_m": 14.0,
+      "shape": "Cyl+panels"
+    },
+    {
+      "norad_id": 58199,
+      "name": "TIANHUI 5A",
+      "max_m": 14.0,
+      "shape": "Box + 2 Pan"
+    },
+    {
+      "norad_id": 58753,
+      "name": "EINSTEIN PROBE",
+      "max_m": 14.0,
+      "shape": "Box + 2 pan"
+    },
+    {
+      "norad_id": 65053,
+      "name": "NISAR",
+      "max_m": 14.0,
+      "shape": "Box+2 pan"
+    },
+    {
+      "norad_id": 56232,
+      "name": "FENGYUN 3G",
+      "max_m": 13.7,
+      "shape": "Box + 2 Pan"
+    },
+    {
+      "norad_id": 54149,
+      "name": "GSLV R/B",
+      "max_m": 13.3,
+      "shape": "Cyl"
+    },
+    {
+      "norad_id": 20580,
+      "name": "HST",
+      "max_m": 13.1,
+      "shape": "Step Cyl + 2 Pan"
+    },
+    {
+      "norad_id": 39084,
+      "name": "LANDSAT 8",
+      "max_m": 13.0,
+      "shape": "Cyl hex + pan"
+    },
+    {
+      "norad_id": 39574,
+      "name": "GPM-CORE",
+      "max_m": 13.0,
+      "shape": "Box + 2  pan"
+    },
+    {
+      "norad_id": 59371,
+      "name": "RESURS-P 4",
+      "max_m": 13.0,
+      "shape": "Cy+2 pan"
+    },
+    {
+      "norad_id": 4327,
+      "name": "SERT 2",
+      "max_m": 12.7,
+      "shape": "Cyl + 2 Pan"
+    },
+    {
+      "norad_id": 33504,
+      "name": "KORONAS-FOTON",
+      "max_m": 12.7,
+      "shape": "Cyl + 2 Pan"
+    },
+    {
+      "norad_id": 59588,
+      "name": "ACS3",
+      "max_m": 12.7,
+      "shape": "Box+sail"
+    },
+    {
+      "norad_id": 59881,
+      "name": "PREFIRE-2",
+      "max_m": 12.7,
+      "shape": "Box+sail"
+    },
+    {
+      "norad_id": 66004,
+      "name": "CZ-8A R/B",
+      "max_m": 12.4,
+      "shape": "Cyl"
+    },
+    {
+      "norad_id": 20443,
+      "name": "ARIANE 40 R/B",
+      "max_m": 12.1,
+      "shape": "Cyl"
+    },
+    {
+      "norad_id": 23561,
+      "name": "ARIANE 40+ R/B",
+      "max_m": 12.1,
+      "shape": "Cyl"
+    },
+    {
+      "norad_id": 27422,
+      "name": "IDEFIX & ARIANE 42P R/B",
+      "max_m": 12.1,
+      "shape": "Cyl"
+    },
+    {
+      "norad_id": 10967,
+      "name": "SEASAT 1",
+      "max_m": 12.0,
+      "shape": "Cyl + 3 Pan"
+    },
+    {
+      "norad_id": 28649,
+      "name": "IRS-P5 (CARTOSAT-1)",
+      "max_m": 12.0,
+      "shape": "Box + 2 Pan"
+    },
+    {
+      "norad_id": 31573,
+      "name": "GLOBALSTAR M069",
+      "max_m": 12.0,
+      "shape": "Box + 2 Pan"
+    },
+    {
+      "norad_id": 31598,
+      "name": "COSMO-SKYMED 1",
+      "max_m": 12.0,
+      "shape": "Box + 2 Pan"
+    },
+    {
+      "norad_id": 37387,
+      "name": "RESOURCESAT-2",
+      "max_m": 12.0,
+      "shape": "Box + 2 Pan"
+    },
+    {
+      "norad_id": 44873,
+      "name": "CSG-1",
+      "max_m": 12.0,
+      "shape": "Box + 3 Pan"
+    },
+    {
+      "norad_id": 63772,
+      "name": "BIOMASS",
+      "max_m": 12.0,
+      "shape": "Box+pan+dish"
+    },
+    {
+      "norad_id": 64199,
+      "name": "SHIJIAN-26 (SJ-26)",
+      "max_m": 12.0,
+      "shape": "Box + 2 Pan"
+    },
+    {
+      "norad_id": 66988,
+      "name": "YAOGAN-47",
+      "max_m": 12.0,
+      "shape": "Box + 2 Pan"
+    },
+    {
+      "norad_id": 69095,
+      "name": "ZHUQUE-2E R/B",
+      "max_m": 12.0,
+      "shape": "Cyl"
+    },
+    {
+      "norad_id": 69792,
+      "name": "LINK",
+      "max_m": 12.0,
+      "shape": "Box + 2 pan"
+    },
+    {
+      "norad_id": 21574,
+      "name": "ERS-1",
+      "max_m": 11.8,
+      "shape": "Box + Pan"
+    },
+    {
+      "norad_id": 26998,
+      "name": "TIMED",
+      "max_m": 11.7,
+      "shape": "Box + 2 Pan"
+    },
+    {
+      "norad_id": 35931,
+      "name": "OCEANSAT-2",
+      "max_m": 11.7,
+      "shape": "Box + 2 Pan"
+    },
+    {
+      "norad_id": 51656,
+      "name": "EOS-4",
+      "max_m": 11.7,
+      "shape": "Box + Hex Box+3 pan"
+    },
+    {
+      "norad_id": 5560,
+      "name": "ASTEX 1",
+      "max_m": 11.3,
+      "shape": "Cyl + Pan"
+    }
+  ]
+}

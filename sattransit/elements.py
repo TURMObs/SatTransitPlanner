@@ -15,7 +15,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -84,6 +84,9 @@ class Catalog:
     entries: list[CatalogEntry]
     sources: list[GroupSource]
     skipped_stale: int
+    # Satellites the groups carry, but with elements too old to trust. Kept so a
+    # caller can tell "stale" from "not in these groups at all".
+    stale_ids: list[int] = field(default_factory=list)
 
 
 def _group_url(config: CelestrakConfig, group: str) -> str:
@@ -222,10 +225,12 @@ def load_catalog(
         )
 
     entries = []
+    stale_ids = []
     for entry in by_norad.values():
         age_days = abs((entry.epoch_utc - reference).total_seconds()) / 86400.0
         if age_days > max_element_age_days:
             skipped_stale += 1
+            stale_ids.append(entry.norad_id)
             continue
         entries.append(entry)
 
@@ -236,7 +241,12 @@ def load_catalog(
         )
 
     entries.sort(key=lambda e: e.norad_id)
-    return Catalog(entries=entries, sources=sources, skipped_stale=skipped_stale)
+    return Catalog(
+        entries=entries,
+        sources=sources,
+        skipped_stale=skipped_stale,
+        stale_ids=sorted(stale_ids),
+    )
 
 
 def _obtain(
