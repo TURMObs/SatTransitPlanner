@@ -7,8 +7,10 @@ venv/
 # Local machine state, not shared: it records absolute paths from this checkout.
 .claude/settings.local.json
 
-# Local site configuration and results
-config.json
+# Local site configuration and results. The glob also covers backups such as
+# config.old.json, which a rule naming config.json alone would let through.
+config*.json
+!config.example.json
 transits.json
 
 # Downloaded orbital elements (OMM JSON), size catalogue and ephemerides

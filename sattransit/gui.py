@@ -5,8 +5,9 @@ Reads the JSON written by ``python -m sattransit`` and shows one event at a
 time: the list on the left, the Sun's disk with the satellite's chord across it
 on the right.
 
+    python -m sattransit.gui                         # uses config.json's output.file
     python -m sattransit.gui results.json
-    python -m sattransit.gui -c config.json          # uses output.file
+    python -m sattransit.gui --config other-site.json
     python -m sattransit.gui results.json --theme light
 """
 
@@ -56,7 +57,7 @@ except ImportError:
     sys.exit("PyQt6 is required for the GUI: pip install PyQt6")
 
 from . import __version__
-from .config import ConfigError, load_config
+from .config import DEFAULT_CONFIG_FILE, ConfigError, load_config
 
 # --- Themes ------------------------------------------------------------------
 #
@@ -220,7 +221,7 @@ def load_report(path: Path) -> dict:
     if not isinstance(raw, dict) or "events" not in raw or "observatory" not in raw:
         raise ReportError(
             f"{path} does not look like a SatTransitPlanner result.\n"
-            "Generate one with: python -m sattransit -c config.json --start ... --duration ..."
+            "Generate one with: python -m sattransit --start ... --duration ..."
         )
     return raw
 
@@ -1022,10 +1023,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("results", nargs="?", help="results JSON to open")
     parser.add_argument(
-        "-c",
         "--config",
+        metavar="FILE",
         help="configuration file; its output.file is opened when no results file is given, "
-        "and its gui.theme selects the theme",
+        f"and its gui.theme selects the theme (default: {DEFAULT_CONFIG_FILE}, when present)",
     )
     parser.add_argument("--theme", choices=("dark", "light"), help="override the configured theme")
     parser.add_argument("--version", action="version", version=f"SatTransitPlanner {__version__}")
@@ -1038,9 +1039,12 @@ def main(argv: list[str] | None = None) -> int:
     theme_name = args.theme or "dark"
     results = Path(args.results) if args.results else None
 
-    if args.config:
+    # A named configuration file must exist; the default is only a convenience,
+    # so its absence leaves the viewer empty rather than failing.
+    config_file = args.config or DEFAULT_CONFIG_FILE
+    if args.config or Path(config_file).is_file():
         try:
-            config = load_config(args.config)
+            config = load_config(config_file)
         except ConfigError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2

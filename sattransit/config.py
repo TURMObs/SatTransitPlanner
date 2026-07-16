@@ -11,6 +11,9 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .sizes import parse_overrides
 
+# Both frontends fall back to this when no configuration file is named.
+DEFAULT_CONFIG_FILE = "config.json"
+
 
 class ConfigError(ValueError):
     """Raised when the configuration file is missing or malformed."""
@@ -149,7 +152,10 @@ def _build(cls: type, data: Any, section: str):
 def load_config(path: str | Path) -> Config:
     path = Path(path).expanduser().resolve()
     if not path.is_file():
-        raise ConfigError(f"configuration file not found: {path}")
+        raise ConfigError(
+            f"configuration file not found: {path}\n"
+            "  Copy config.example.json to config.json and edit it for your site."
+        )
 
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))

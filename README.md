@@ -39,12 +39,15 @@ pip install -r requirements.txt
 
 ```bash
 cp config.example.json config.json      # then edit it for your site
-python -m sattransit -c config.json --start 2026-07-16T05:00 --duration 12h
+python -m sattransit --start 2026-07-16T05:00 --duration 12h
 ```
 
 The window can be given as `--start` plus either `--duration` (`12h`, `90min`,
 `2d`, `1d6h`) or `--end`. Times without a timezone are read in the observatory's
 timezone; `--start now` is accepted. `-o` overrides the output file.
+
+Settings come from `config.json` in the current directory; `--config FILE` reads
+another, which is how a second observatory or a trial setup fits alongside.
 
 ```
 local time                     type         satellite                     size       sep     dur    alt
@@ -65,8 +68,8 @@ Searching every active satellite over a week takes minutes. `--favorites`
 searches only a listed few, which takes seconds:
 
 ```bash
-python -m sattransit -c config.json --start now --duration 7d --favorites
-python -m sattransit -c config.json --start now --duration 7d --favorites mine.json
+python -m sattransit --start now --duration 7d --favorites
+python -m sattransit --start now --duration 7d --favorites mine.json
 ```
 
 Without a file it uses `favorites.file` from the config. The shipped
@@ -95,9 +98,9 @@ elements, and the result file records the same under `catalog.favorites`.
 ### Regenerating the list
 
 ```bash
-python -m sattransit -c config.json --make-favorites          # 60, the default
-python -m sattransit -c config.json --make-favorites 100
-python -m sattransit -c config.json --favorites mine.json --make-favorites 25
+python -m sattransit --make-favorites          # 60, the default
+python -m sattransit --make-favorites 100
+python -m sattransit --favorites mine.json --make-favorites 25
 ```
 
 This rebuilds the list and exits without searching, so it needs no `--start`.
@@ -134,10 +137,14 @@ catalogue would put it in a list of low-orbit targets.
 ## Viewing the results
 
 ```bash
-python -m sattransit.gui transits.json
-python -m sattransit.gui -c config.json      # opens the config's output.file
-python transit_gui.py -c config.json         # same, without -m
+python -m sattransit.gui                     # opens config.json's output.file
+python -m sattransit.gui transits.json       # or a results file directly
+python transit_gui.py                        # same, without -m
 ```
+
+With nothing named it reads `config.json` and opens the results it points at,
+falling back to an empty window when there is no such file. `--config FILE`
+reads another.
 
 The viewer lists the events on the left — time, satellite, apparent size, type,
 separation, duration, altitude and range — and draws the selected one on the

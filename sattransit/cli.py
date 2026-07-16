@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from skyfield.api import Loader
 
 from . import __version__
-from .config import ConfigError, load_config
+from .config import DEFAULT_CONFIG_FILE, ConfigError, load_config
 from .finder import TransitFinder
 from .report import build_report
 from .sizes import SizeError, load_catalogue
@@ -27,14 +27,20 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "examples:\n"
-            "  sattransit -c config.json --start 2026-07-16T05:00 --duration 12h\n"
-            "  sattransit -c config.json --start now --duration 2d -o today.json\n"
-            "  sattransit -c config.json --start 2026-07-16T05:00 --end 2026-07-16T20:00\n"
-            "  sattransit -c config.json --start now --duration 7d --favorites\n"
-            "  sattransit -c config.json --make-favorites 60\n"
+            "  sattransit --start 2026-07-16T05:00 --duration 12h\n"
+            "  sattransit --start now --duration 2d -o today.json\n"
+            "  sattransit --start 2026-07-16T05:00 --end 2026-07-16T20:00\n"
+            "  sattransit --start now --duration 7d --favorites\n"
+            "  sattransit --make-favorites 60\n"
+            "  sattransit --config other-site.json --start now --duration 12h\n"
         ),
     )
-    parser.add_argument("-c", "--config", required=True, help="path to the JSON configuration file")
+    parser.add_argument(
+        "--config",
+        default=DEFAULT_CONFIG_FILE,
+        metavar="FILE",
+        help=f"JSON configuration file (default: {DEFAULT_CONFIG_FILE})",
+    )
     parser.add_argument(
         "--start",
         help="start of the observation window (ISO 8601, or 'now'); "
