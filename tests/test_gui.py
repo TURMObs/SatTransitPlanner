@@ -8,6 +8,7 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PyQt6", reason="the GUI is optional")
 
+from PyQt6.QtCore import Qt  # noqa: E402
 from PyQt6.QtWidgets import QApplication  # noqa: E402
 
 from sattransit.gui import (  # noqa: E402
@@ -229,9 +230,29 @@ def test_empty_report_clears_the_view(app):
 # --- filters -----------------------------------------------------------------
 
 
-def _event(name, kind="near_miss", range_km=1600.0, altitude=20.0, separation=1500.0, hour=16):
+def _event(
+    name,
+    kind="near_miss",
+    range_km=1600.0,
+    altitude=20.0,
+    separation=1500.0,
+    hour=16,
+    apparent=3.7,
+):
     event = json.loads(json.dumps(TRANSIT))  # deep copy
     event["satellite"]["name"] = name
+    event["size"] = (
+        None
+        if apparent is None
+        else {
+            "min_m": 0.3,
+            "max_m": 29.0,
+            "shape": "Box + pan",
+            "source": "gcat",
+            "angular_min_arcsec": 0.04,
+            "angular_max_arcsec": apparent,
+        }
+    )
     event["closest_approach"]["time_local"] = f"2026-07-16T{hour:02d}:43:55.699+02:00"
     event["closest_approach"]["time_utc"] = f"2026-07-16T{hour - 2:02d}:43:55.699Z"
     event["type"] = kind
@@ -245,9 +266,15 @@ def _event(name, kind="near_miss", range_km=1600.0, altitude=20.0, separation=15
 MIXED = {
     **REPORT,
     "events": [
-        _event("LOW-NEAR", range_km=1600.0, altitude=11.0, separation=2900.0, hour=10),
-        _event("GPS", "disk_transit", range_km=24384.0, altitude=41.0, separation=302.0, hour=11),
-        _event("HIGH-LEO", "disk_transit", range_km=1594.0, altitude=55.0, separation=114.0, hour=12),
+        _event("LOW-NEAR", range_km=1600.0, altitude=11.0, separation=2900.0, hour=10,
+               apparent=3.70),
+        # A big satellite, but so far away that it looks tiny.
+        _event("GPS", "disk_transit", range_km=24384.0, altitude=41.0, separation=302.0, hour=11,
+               apparent=0.16),
+        _event("HIGH-LEO", "disk_transit", range_km=1594.0, altitude=55.0, separation=114.0,
+               hour=12, apparent=3.75),
+        _event("NO-SIZE", "disk_transit", range_km=700.0, altitude=60.0, separation=100.0,
+               hour=13, apparent=None),
     ],
 }
 
@@ -258,25 +285,37 @@ def _window(app, report=MIXED):
 
 def _names(window):
     """Satellite names of the rows the user can actually see."""
-    return [window._table.item(row, 1).text() for row in window._shown_rows()]
+    return [window._table.item(row, _col("Satellite")).text() for row in window._shown_rows()]
+
+
+def _col(name):
+    """Index of a column by name, so inserting one cannot break the tests."""
+    return COLUMNS.index(name)
+
+
+def _shown(window, column):
+    return {
+        window._table.item(r, _col("Satellite")).text(): window._table.item(r, _col(column)).text()
+        for r in window._shown_rows()
+    }
 
 
 def test_range_filter_hides_distant_satellites(app):
     window = _window(app)
     window._max_range.setValue(2000.0)
-    assert set(_names(window)) == {"LOW-NEAR", "HIGH-LEO"}  # GPS at 24384 km is gone
+    assert set(_names(window)) == {"LOW-NEAR", "HIGH-LEO", "NO-SIZE"}  # GPS at 24384 km is gone
 
 
 def test_altitude_filter_hides_low_events(app):
     window = _window(app)
     window._min_altitude.setValue(30.0)
-    assert set(_names(window)) == {"GPS", "HIGH-LEO"}
+    assert set(_names(window)) == {"GPS", "HIGH-LEO", "NO-SIZE"}
 
 
 def test_separation_filter_hides_distant_approaches(app):
     window = _window(app)
     window._max_separation.setValue(500.0)
-    assert set(_names(window)) == {"GPS", "HIGH-LEO"}
+    assert set(_names(window)) == {"GPS", "HIGH-LEO", "NO-SIZE"}
 
 
 def test_separation_filter_stands_in_for_a_transits_only_switch(app):
@@ -284,14 +323,15 @@ def test_separation_filter_stands_in_for_a_transits_only_switch(app):
     # radius is the same thing, and says so in the units the user is reading.
     window = _window(app)
     window._max_separation.setValue(944.0)
-    assert set(_names(window)) == {"GPS", "HIGH-LEO"}  # both disk transits
+    assert set(_names(window)) == {"GPS", "HIGH-LEO", "NO-SIZE"}  # all disk transits
 
 
 def test_filters_combine(app):
     window = _window(app)
-    window._max_separation.setValue(944.0)
-    window._max_range.setValue(2000.0)
-    window._min_altitude.setValue(30.0)
+    window._max_separation.setValue(944.0)  # drops nothing here
+    window._max_range.setValue(2000.0)      # drops GPS
+    window._min_altitude.setValue(30.0)     # drops LOW-NEAR
+    window._min_size.setValue(1.0)          # drops NO-SIZE
     assert _names(window) == ["HIGH-LEO"]
 
 
@@ -300,7 +340,7 @@ def test_a_limit_of_zero_means_any(app):
     window._max_range.setValue(0.0)
     window._min_altitude.setValue(0.0)
     window._max_separation.setValue(0.0)
-    assert len(window._shown_rows()) == 3
+    assert len(window._shown_rows()) == 4
     assert window._max_range.text() == "any"
 
 
@@ -318,29 +358,27 @@ def test_reset_restores_every_event(app):
     window._min_altitude.setValue(80.0)
     assert window._shown_rows() == []
     window._reset_filters()
-    assert len(window._shown_rows()) == 3
+    assert len(window._shown_rows()) == 4
     assert window._max_range.value() == 0.0
 
 
 def test_status_reports_how_many_are_shown(app):
     window = _window(app)
     window._max_range.setValue(2000.0)
-    assert "showing 2 of 3" in window._status.text()
+    assert "showing 3 of 4" in window._status.text()
 
 
 def test_sky_view_follows_the_filter_and_the_selection(app):
     window = _window(app)
     window._max_range.setValue(2000.0)
-    assert len(window._sky._events) == 2
+    assert len(window._sky._events) == 3
     window._table.selectRow(0)
     assert window._sky._selected is not None
 
 
 def test_range_is_in_the_table(app):
     window = _window(app)
-    assert COLUMNS[-1] == "Range (km)"
-    values = {window._table.item(r, 6).text() for r in range(window._table.rowCount())}
-    assert "24,384" in values
+    assert _shown(window, "Range (km)")["GPS"] == "24,384"
 
 
 # --- date handling -----------------------------------------------------------
@@ -356,11 +394,11 @@ def test_filters_still_hold_after_re_sorting(app):
     # Every row must still agree with the filter afterwards.
     window = _window(app)
     window._min_altitude.setValue(30.0)
-    window._table.sortItems(6)  # by range
+    window._table.sortItems(_col("Range (km)"))
     for row in range(window._table.rowCount()):
         hidden = window._table.isRowHidden(row)
         assert hidden != window._passes(window._event_at(row))
-    assert set(_names(window)) == {"GPS", "HIGH-LEO"}
+    assert set(_names(window)) == {"GPS", "HIGH-LEO", "NO-SIZE"}
 
 
 def test_multi_day_window_keeps_the_date(app):
@@ -480,3 +518,57 @@ def test_an_older_report_without_the_size_field_still_opens(app):
     assert values["Apparent size"] is None
     window = _window(app, {**REPORT, "events": [TRANSIT]})
     assert not window.grab().isNull()
+
+
+# --- apparent size in the list ------------------------------------------------
+
+
+def test_the_list_carries_apparent_size_next_to_the_name(app):
+    # Apparent size is what decides whether an event is worth shooting, so it
+    # sits beside the satellite rather than at the far end of the row.
+    assert COLUMNS[2] == "Size (″)"
+    shown = _shown(_window(app), "Size (″)")
+    assert shown["HIGH-LEO"] == "3.75"
+    assert shown["GPS"] == "0.16"  # 19 m across, but at 24000 km
+    assert shown["NO-SIZE"] == "—"
+
+
+def test_apparent_size_sorts_numerically_not_as_text(app):
+    window = _window(app)
+    window._table.sortItems(_col("Size (″)"), Qt.SortOrder.AscendingOrder)
+    values = [window._table.item(r, _col("Size (″)")).text() for r in window._shown_rows()]
+    assert values == ["—", "0.16", "3.70", "3.75"]  # the unknown sorts below the rest
+
+
+def test_size_filter_keeps_only_satellites_that_look_big_enough(app):
+    window = _window(app)
+    window._min_size.setValue(1.0)
+    # The GPS satellite is physically the second largest here but subtends 0.16".
+    assert set(_names(window)) == {"LOW-NEAR", "HIGH-LEO"}
+
+
+def test_size_filter_hides_satellites_of_unknown_size(app):
+    # An unknown size cannot be shown to pass the test, so it is hidden.
+    window = _window(app)
+    assert "NO-SIZE" in _names(window)
+    window._min_size.setValue(0.5)
+    assert "NO-SIZE" not in _names(window)
+
+
+def test_size_filter_has_a_decimal_place(app):
+    # The others step in whole units; apparent sizes are fractions of an arcsec.
+    window = _window(app)
+    assert window._min_size.decimals() == 1
+    assert window._min_size.singleStep() == 0.5
+    window._min_size.setValue(0.5)
+    assert window._min_size.value() == 0.5
+    assert window._max_range.decimals() == 0
+
+
+def test_size_filter_is_cleared_by_reset(app):
+    window = _window(app)
+    window._min_size.setValue(3.0)
+    assert len(_names(window)) == 2
+    window._reset_filters()
+    assert len(_names(window)) == 4
+    assert window._min_size.text() == "any"

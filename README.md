@@ -46,11 +46,14 @@ The window can be given as `--start` plus either `--duration` (`12h`, `90min`,
 timezone; `--start now` is accepted. `-o` overrides the output file.
 
 ```
-local time                     type         satellite                        sep     dur    alt
------------------------------------------------------------------------------------------------
-2026-07-16T16:43:55.699+02:00  disk_transit AQUA                            261"   1.15s  41.5°
-2026-07-16T19:02:02.323+02:00  near_miss    SL-14 R/B                      1578"       -  18.1°
+local time                     type         satellite                     size       sep     dur    alt
+-------------------------------------------------------------------------------------------------------
+2026-07-16T14:31:59.095+02:00  disk_transit STARLINK-11281 [DTC]        14.24"      864"   0.21s  59.3°
+2026-07-16T16:43:55.699+02:00  disk_transit AQUA                          0.71"      261"   1.15s  41.5°
+2026-07-16T19:54:45.145+02:00  near_miss    ONEWEB-0717                   0.36"     2672"       -  13.2°
 ```
+
+`size` is how large the satellite looks — see *Satellite sizes*.
 
 Other options: `--refresh` forces a re-download of the catalogues, `--offline`
 works from the cache and never uses the network, `-q` silences progress output.
@@ -63,8 +66,10 @@ python -m sattransit.gui -c config.json      # opens the config's output.file
 python transit_gui.py -c config.json         # same, without -m
 ```
 
-The viewer lists the events on the left — time, satellite, type, separation,
-duration, altitude and range — and draws the selected one on the right.
+The viewer lists the events on the left — time, satellite, apparent size, type,
+separation, duration, altitude and range — and draws the selected one on the
+right. Apparent size sits next to the name because it is usually what decides
+whether an event is worth shooting.
 
 The **disk view** shows the Sun with the satellite's chord across it: dark where
 the satellite is a silhouette on the photosphere, faint and dashed where it is
@@ -79,13 +84,14 @@ selected event is ringed.
 Both use the usual view of the sky: north up, east left. The figures for the
 selected event are below; every panel divider can be dragged.
 
-Filters sit above the list: an upper limit on range, a lower limit on altitude,
-and an upper limit on the distance from the Sun's centre. Setting that last one
-below the solar radius (about 944″) is the same as asking for disk transits
-only. A limit reading `any` is not filtering anything, the `−` and `+` buttons
-step it (hold to repeat), and `Reset` clears them all. The top line reports how
-many events are showing. Any column heading sorts the list, and `Open…` loads
-another results file.
+Filters sit above the list: upper limits on range and on the distance from the
+Sun's centre, and lower limits on altitude and on apparent size. Setting the
+separation below the solar radius (about 944″) is the same as asking for disk
+transits only, and a size limit is the quickest way to a shortlist worth
+pointing at. A limit reading `any` is not filtering anything, the `−` and `+`
+buttons step it (hold to repeat), and `Reset` clears them all. The top line
+reports how many events are showing. Any column heading sorts the list, and
+`Open…` loads another results file.
 
 It uses the same PyQt6 framework and theme as the TURM Control GUI. The theme
 follows `gui.theme` in the config file (`dark` or `light`); `--theme` overrides
@@ -188,8 +194,16 @@ silhouette whose extent depends on its attitude, which nothing here predicts, so
 
 `max_m` is the span, deployables included, and is the end of the range that
 usually matters — the lower bound is the smallest catalogued dimension, which
-for a flat panel is its thickness. For scale, these are fractions of an arcsecond
-to a few arcseconds: below the seeing you are shooting through.
+for a flat panel is its thickness. The list, the filter and the command line all
+use `angular_max_arcsec`: what that longest dimension subtends at the range of
+the event. That already folds in the distance, so a large satellite far away
+ranks below a small one overhead — a GPS satellite is 19 m across but subtends
+0.16″ from 24 000 km, while a Starlink v2-mini reaches about 14″ from 400 km.
+For scale, these are fractions of an arcsecond to a few tens: mostly at or below
+the seeing you are shooting through.
+
+A satellite whose size is unknown shows `—`, and a size filter hides it: nothing
+can be shown to pass a limit it has no figure for.
 
 GCAT describes each object **as launched**. For an assembled structure the entry
 is the individual piece — object 25544 is the Zarya module, span 23.9 m, not the

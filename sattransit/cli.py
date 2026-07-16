@@ -184,16 +184,23 @@ def _print_summary(report: dict) -> None:
         return
 
     print(file=sys.stderr)
-    header = f"{'local time':<30} {'type':<12} {'satellite':<26} {'sep':>9} {'dur':>7} {'alt':>6}"
+    header = (
+        f"{'local time':<30} {'type':<12} {'satellite':<26} "
+        f"{'size':>7} {'sep':>9} {'dur':>7} {'alt':>6}"
+    )
     print(header, file=sys.stderr)
     print("-" * len(header), file=sys.stderr)
     for event in events:
         transit = event["transit"]
         duration = f"{transit['duration_seconds']:.2f}s" if transit else "-"
+        # What the satellite's longest dimension subtends: how big it looks.
+        size = event.get("size")
+        apparent = f"{size['angular_max_arcsec']:.2f}\"" if size else "-"
         print(
             f"{event['closest_approach']['time_local']:<30} "
             f"{event['type']:<12} "
             f"{event['satellite']['name'][:25]:<26} "
+            f"{apparent:>7} "
             f"{event['closest_approach']['separation_arcsec']:>8.0f}\" "
             f"{duration:>7} "
             f"{event['geometry']['satellite_altitude_deg']:>5.1f}°",

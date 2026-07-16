@@ -39,6 +39,7 @@ try:
         QDoubleSpinBox,
         QFileDialog,
         QFrame,
+        QGridLayout,
         QHBoxLayout,
         QHeaderView,
         QLabel,
@@ -263,10 +264,12 @@ def _offsets(separation_arcsec: float, position_angle_deg: float) -> tuple[float
     return separation_arcsec * math.sin(angle), separation_arcsec * math.cos(angle)
 
 
-def _limit_box(suffix: str, maximum: float, step: float, tip: str) -> QDoubleSpinBox:
+def _limit_box(
+    suffix: str, maximum: float, step: float, tip: str, decimals: int = 0
+) -> QDoubleSpinBox:
     """A numeric filter limit. Its minimum, 0, reads as 'any' and filters nothing."""
     box = QDoubleSpinBox()
-    box.setDecimals(0)
+    box.setDecimals(decimals)
     box.setRange(0.0, maximum)
     box.setSingleStep(step)
     box.setSuffix(suffix)
@@ -294,7 +297,8 @@ def _limit_field(box: QDoubleSpinBox, tip: str) -> QWidget:
         button.setObjectName("step")
         button.setFixedWidth(34)
         button.setMinimumHeight(34)
-        button.setToolTip(f"{what} by {box.singleStep():.0f}{box.suffix()} — {tip}")
+        step_text = f"{box.singleStep():.{box.decimals()}f}"
+        button.setToolTip(f"{what} by {step_text}{box.suffix()} — {tip}")
         button.setAutoRepeat(True)
         button.setAutoRepeatDelay(350)
         button.setAutoRepeatInterval(160)
@@ -582,7 +586,23 @@ class SkyView(QWidget):
 
 # --- Main window -------------------------------------------------------------
 
-COLUMNS = ["Local time", "Satellite", "Type", "Sep (″)", "Dur (s)", "Alt (°)", "Range (km)"]
+# Apparent size sits next to the name: it is what decides whether an event is
+# worth shooting, and unlike the dimensions in metres it already accounts for
+# how far away the satellite is.
+COLUMNS = [
+    "Local time", "Satellite", "Size (″)", "Type", "Sep (″)", "Dur (s)", "Alt (°)", "Range (km)",
+]
+_RIGHT_ALIGNED = {"Size (″)", "Sep (″)", "Dur (s)", "Alt (°)", "Range (km)"}
+
+
+def _apparent_size(event: dict) -> float | None:
+    """What the satellite's longest dimension subtends, in arcsec.
+
+    The longest dimension sets how large the silhouette can get, so its angular
+    extent is the figure the list and the filter use.
+    """
+    size = event.get("size")
+    return None if not size else size.get("angular_max_arcsec")
 
 
 class ViewerWindow(QWidget):
@@ -644,12 +664,16 @@ class ViewerWindow(QWidget):
         lay.setSpacing(6)
 
         range_tip = "hides satellites further away than this"
+        size_tip = "hides satellites that appear smaller than this"
         altitude_tip = "hides events lower in the sky than this"
         separation_tip = "hides events further from the Sun's centre than this"
         self._max_range = _limit_box(" km", 100000.0, 100.0, range_tip)
         self._min_altitude = _limit_box(" °", 90.0, 5.0, altitude_tip)
         self._max_separation = _limit_box(" ″", 7200.0, 100.0, separation_tip)
-        for box in (self._max_range, self._min_altitude, self._max_separation):
+        # Apparent sizes run from a fraction of an arcsecond to tens, so this
+        # one needs a decimal place where the others do not.
+        self._min_size = _limit_box(" ″", 120.0, 0.5, size_tip, decimals=1)
+        for box in (self._max_range, self._min_altitude, self._max_separation, self._min_size):
             box.valueChanged.connect(lambda _: self._apply_filters())
 
         reset = QPushButton("Reset")
@@ -657,18 +681,25 @@ class ViewerWindow(QWidget):
         reset.setToolTip("Clear every filter")
         reset.clicked.connect(self._reset_filters)
 
-        filters = QHBoxLayout()
-        filters.setSpacing(8)
-        for text, box, tip in (
-            ("Range ≤", self._max_range, range_tip),
-            ("Alt ≥", self._min_altitude, altitude_tip),
-            ("Sep ≤", self._max_separation, separation_tip),
+        filters = QGridLayout()
+        filters.setHorizontalSpacing(8)
+        filters.setVerticalSpacing(4)
+        for index, (text, box, tip) in enumerate(
+            (
+                ("Range ≤", self._max_range, range_tip),
+                ("Sep ≤", self._max_separation, separation_tip),
+                ("Alt ≥", self._min_altitude, altitude_tip),
+                ("Size ≥", self._min_size, size_tip),
+            )
         ):
+            row, column = divmod(index, 2)
             label = QLabel(text)
             label.setObjectName("sname")
-            filters.addWidget(label)
-            filters.addWidget(_limit_field(box, tip), stretch=1)
-        filters.addWidget(reset)
+            filters.addWidget(label, row, column * 2)
+            filters.addWidget(_limit_field(box, tip), row, column * 2 + 1)
+        filters.setColumnStretch(1, 1)
+        filters.setColumnStretch(3, 1)
+        filters.addWidget(reset, 0, 4, 2, 1)  # spans both rows
         lay.addLayout(filters)
 
         self._table = QTableWidget(0, len(COLUMNS))
@@ -772,6 +803,12 @@ class ViewerWindow(QWidget):
         if self._max_separation.value() > 0:
             if event["closest_approach"]["separation_arcsec"] > self._max_separation.value():
                 return False
+        if self._min_size.value() > 0:
+            apparent = _apparent_size(event)
+            # A satellite of unknown size cannot be shown to pass, so asking for
+            # a minimum size hides it.
+            if apparent is None or apparent < self._min_size.value():
+                return False
         return True
 
     def _event_at(self, row: int) -> dict | None:
@@ -782,7 +819,7 @@ class ViewerWindow(QWidget):
         return [r for r in range(self._table.rowCount()) if not self._table.isRowHidden(r)]
 
     def _reset_filters(self):
-        for box in (self._max_range, self._min_altitude, self._max_separation):
+        for box in (self._max_range, self._min_altitude, self._max_separation, self._min_size):
             box.blockSignals(True)
             box.setValue(0.0)
             box.blockSignals(False)
@@ -833,6 +870,7 @@ class ViewerWindow(QWidget):
             geometry = event["geometry"]
             transit = event.get("transit")
             duration = transit["duration_seconds"] if transit else None
+            apparent = _apparent_size(event)
 
             cells = [
                 _Item(
@@ -840,6 +878,10 @@ class ViewerWindow(QWidget):
                     approach["time_utc"],
                 ),
                 _Item(event["satellite"]["name"] or "?", (event["satellite"]["name"] or "").lower()),
+                _Item(
+                    "—" if apparent is None else f"{apparent:.2f}",
+                    -1.0 if apparent is None else apparent,
+                ),
                 _Item(
                     "transit" if event["type"] == "disk_transit" else "near miss",
                     0 if event["type"] == "disk_transit" else 1,
@@ -855,7 +897,7 @@ class ViewerWindow(QWidget):
                 f"{event['satellite']['name']}  ·  NORAD {event['satellite']['norad_id']}"
             )
             for column, cell in enumerate(cells):
-                if column >= 3:
+                if COLUMNS[column] in _RIGHT_ALIGNED:
                     cell.setTextAlignment(
                         Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
                     )
