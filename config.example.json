@@ -11,7 +11,7 @@
   "ephemeris": "de421.bsp",
 
   "celestrak": {
-    "groups": ["stations", "visual"],
+    "groups": ["active", "visual", "last-30-days", "stations"],
     "base_url": "https://celestrak.org/NORAD/elements/gp.php",
     "max_age_days": 1.0,
     "offline": false

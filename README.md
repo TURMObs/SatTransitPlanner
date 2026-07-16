@@ -187,7 +187,7 @@ everything else has defaults.
 | `observatory` | `name`, `latitude_deg`, `longitude_deg`, `elevation_m`, `timezone` (IANA name) |
 | `cache_dir` | Where elements and the ephemeris are cached (relative paths resolve next to the config file) |
 | `ephemeris` | JPL ephemeris to download and use; `de421.bsp` (17 MB) is plenty for the Sun |
-| `celestrak.groups` | Group names to search, e.g. `stations`, `visual`, `starlink`. See the [CelesTrak index](https://celestrak.org/NORAD/elements/) |
+| `celestrak.groups` | Group names to search. See *Which groups to search*, and the [CelesTrak index](https://celestrak.org/NORAD/elements/) for the full list |
 | `celestrak.max_age_days` | Re-download a group's elements once the cached copy is older than this. CelesTrak publishes new sets every two hours, so values below ~0.08 gain nothing |
 | `celestrak.offline` | Never contact CelesTrak |
 | `search.max_separation_deg` | Report approaches within this angle of the Sun's **center**. `null` means "solar limb", i.e. only true disk transits |
@@ -211,6 +211,50 @@ groups. When groups disagree about a satellite's elements, the set with the
 epoch closest to the observation window is used.
 
 ## Orbital elements
+
+### Which groups to search
+
+`config.example.json` asks for `active`, `visual`, `last-30-days` and
+`stations`. Measured against CelesTrak's own SATCAT — every object still in
+orbit, with its current orbit — joined to GCAT's dimensions, that reaches 94.9%
+of the 13 584 objects larger than 5 m in low Earth orbit, and 95.5% of those
+larger than 10 m. It is also as far as CelesTrak's public groups go.
+
+| added | coverage of large LEO objects | gain |
+| --- | --- | --- |
+| `active` | 94.4% | +12 820 |
+| `visual` | 94.8% | +63 |
+| `last-30-days` | 94.9% | +6 |
+| `stations` | 94.9% | +0 |
+
+The counts mislead, and the second row is the one that matters. `active` means
+*active payloads*, so the dead giants are not in it: the 63 that `visual` adds
+include **Envisat** (26 m, dead since 2012), **ALOS** (28 m) and **Midori II**
+(28 m), together with Ariane 40, CZ-8A and GSLV rocket bodies — among the best
+targets there are. `stations` adds nothing measurable, the ISS being in `active`
+already, but it costs 24 objects and says what it means. `last-30-days` earns
+its place over time rather than today, as new launches and fresh spent stages
+appear.
+
+The thematic groups are re-slices of `active`. `military`, `globalstar`,
+`iridium-NEXT`, `weather` and `analyst` were each measured against the four
+above and added exactly nothing; there is no reason to list them.
+
+Searching the lot — about 16 000 satellites — takes roughly two minutes for a
+16-hour window. `--favorites` is the quick path for a long one.
+
+### The 5% that is out of reach
+
+695 large objects in low orbit belong to no CelesTrak group: 212 rocket bodies
+and 469 payloads. The groups are payload-oriented — there is no rocket-body
+group, and no query for the whole catalogue. The gap is mostly classified
+`USA …` payloads (the 29 m ones are Starshield, on the Starlink v2-mini bus;
+the `military` group holds only 24 objects), spent stages such as CZ-4C, CZ-6A
+and Delta, and dead Globalstar, Iridium and Cosmos satellites. Reaching them
+means [Space-Track](https://www.space-track.org/), which serves the full
+catalogue but wants an account.
+
+### Why OMM rather than TLE
 
 Elements are requested as **OMM in JSON** (`FORMAT=json`), not as TLEs. The TLE
 format identifies a satellite with five digits, and that space is now exhausted;
