@@ -1,8 +1,8 @@
 {
   "name": "Largest 60 distinct objects in low Earth orbit",
-  "description": "Generated from GCAT: the largest span among objects CelesTrak still tracks, in orbits below 2000 km, one per satellite family. Shapes whose span comes from a tether or wire antenna are excluded, having no silhouette. max_m is GCAT's span in metres and is informational; the search reads sizes from the size catalogue and search.satellite_sizes_m. Edit freely.",
+  "description": "The largest span among satellites the configured groups carry, below 2000 km, one per family. Spans belonging to a tether or a wire antenna are excluded, having nothing to see. max_m is informational: the search reads sizes from the size catalogue and search.satellite_sizes_m.",
   "source": "GCAT (J. McDowell, planet4589.org/space/gcat), CC-BY-4.0",
-  "generated_utc": "2026-07-16T19:03:37Z",
+  "generated_utc": "2026-07-16T19:27:20Z",
   "satellites": [
     {
       "norad_id": 68495,
@@ -15,13 +15,7 @@
       "name": "CSS (TIANHE)",
       "max_m": 30.0,
       "shape": "Step Cyl + 2 Pan",
-      "note": "assembled station; GCAT's entry is the Tianhe core module alone"
-    },
-    {
-      "norad_id": 55239,
-      "name": "APSTAR-6E",
-      "max_m": 30.0,
-      "shape": "Box+ 2 pan"
+      "note": "assembled station: the size catalogue describes this module alone, so set search.satellite_sizes_m for the whole structure"
     },
     {
       "norad_id": 56287,
@@ -58,7 +52,7 @@
       "name": "ISS (ZARYA)",
       "max_m": 23.9,
       "shape": "Cyl + 2 Pan",
-      "note": "assembled station; GCAT's entry is the Zarya module alone"
+      "note": "assembled station: the size catalogue describes this module alone, so set search.satellite_sizes_m for the whole structure"
     },
     {
       "norad_id": 39634,
@@ -359,6 +353,12 @@
       "name": "EOS-4",
       "max_m": 11.7,
       "shape": "Box + Hex Box+3 pan"
+    },
+    {
+      "norad_id": 69818,
+      "name": "CZ-6A R/B",
+      "max_m": 11.5,
+      "shape": "Cyl"
     },
     {
       "norad_id": 5560,

@@ -6,6 +6,7 @@ import argparse
 import json
 import sys
 import time
+from datetime import datetime, timezone
 
 from skyfield.api import Loader
 
@@ -16,7 +17,7 @@ from .report import build_report
 from .sizes import SizeError, load_catalogue
 from .timeutil import TimeError, resolve_window
 from .elements import ElementsError, load_catalog
-from .favorites import FavoritesError, load_favorites
+from .favorites import FavoritesError, build_favorites, load_favorites, write_favorites
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -30,16 +31,16 @@ def build_parser() -> argparse.ArgumentParser:
             "  sattransit -c config.json --start now --duration 2d -o today.json\n"
             "  sattransit -c config.json --start 2026-07-16T05:00 --end 2026-07-16T20:00\n"
             "  sattransit -c config.json --start now --duration 7d --favorites\n"
+            "  sattransit -c config.json --make-favorites 60\n"
         ),
     )
     parser.add_argument("-c", "--config", required=True, help="path to the JSON configuration file")
     parser.add_argument(
         "--start",
-        required=True,
         help="start of the observation window (ISO 8601, or 'now'); "
         "naive times use the observatory timezone",
     )
-    group = parser.add_mutually_exclusive_group(required=True)
+    group = parser.add_mutually_exclusive_group()
     group.add_argument("--end", help="end of the observation window (ISO 8601)")
     group.add_argument("--duration", help="length of the window, e.g. 12h, 90min, 2d")
 
@@ -50,6 +51,16 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="FILE",
         help="search only the satellites listed in a favourites file, instead of every "
         "satellite in the configured groups; without FILE, uses favorites.file from the config",
+    )
+    parser.add_argument(
+        "--make-favorites",
+        nargs="?",
+        const=60,
+        type=int,
+        metavar="N",
+        help="regenerate the favourites file with the N largest distinct objects in low "
+        "Earth orbit (default 60) and exit, without searching; writes to the file given "
+        "by --favorites, else favorites.file from the config",
     )
     parser.add_argument("-o", "--output", help="output file (overrides output.file in the config)")
     parser.add_argument(
@@ -68,19 +79,28 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    making = args.make_favorites is not None
+    if making:
+        if args.make_favorites < 1:
+            parser.error("--make-favorites needs a positive count")
+    elif not args.start:
+        parser.error("--start is required (or use --make-favorites)")
 
     def log(message: str = "") -> None:
         if not args.quiet:
             print(message, file=sys.stderr)
 
+    start_dt = end_dt = None
     try:
         config = load_config(args.config)
         if args.offline:
             config.celestrak.offline = True
 
         tz = config.observatory.zoneinfo()
-        start_dt, end_dt = resolve_window(args.start, args.end, args.duration, tz)
+        if not making:
+            start_dt, end_dt = resolve_window(args.start, args.end, args.duration, tz)
     except (ConfigError, TimeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -92,15 +112,17 @@ def main(argv: list[str] | None = None) -> int:
     timescale = loader.timescale()
 
     log(f"Observatory : {config.observatory.name}")
-    log(
-        f"Window      : {start_dt.astimezone(tz).isoformat(timespec='seconds')} .. "
-        f"{end_dt.astimezone(tz).isoformat(timespec='seconds')} "
-        f"({(end_dt - start_dt).total_seconds() / 3600.0:.2f} h)"
-    )
+    if not making:
+        log(
+            f"Window      : {start_dt.astimezone(tz).isoformat(timespec='seconds')} .. "
+            f"{end_dt.astimezone(tz).isoformat(timespec='seconds')} "
+            f"({(end_dt - start_dt).total_seconds() / 3600.0:.2f} h)"
+        )
     log("Elements    :")
 
     try:
-        reference = start_dt + (end_dt - start_dt) / 2
+        # Regenerating the list has no window, so judge element age against now.
+        reference = datetime.now(timezone.utc) if making else start_dt + (end_dt - start_dt) / 2
         catalog = load_catalog(
             config.celestrak,
             cache,
@@ -110,7 +132,7 @@ def main(argv: list[str] | None = None) -> int:
             force_refresh=args.refresh,
             log=log,
         )
-        ephemeris = loader(config.ephemeris)
+        ephemeris = None if making else loader(config.ephemeris)
         sizes = {}
         if config.sizes.enabled:
             sizes = load_catalogue(
@@ -122,7 +144,7 @@ def main(argv: list[str] | None = None) -> int:
                 log=log,
             )
         favorites = None
-        if args.favorites:
+        if args.favorites and not making:
             path = config.resolve_favorites(None if args.favorites is True else args.favorites)
             favorites = load_favorites(path)
     except (ElementsError, SizeError, FavoritesError) as exc:
@@ -131,6 +153,9 @@ def main(argv: list[str] | None = None) -> int:
     except OSError as exc:
         print(f"error: could not load ephemeris {config.ephemeris!r}: {exc}", file=sys.stderr)
         return 3
+
+    if making:
+        return _make_favorites(config, args, catalog, sizes, log)
 
     missing: list[int] = []
     if favorites is not None:
@@ -207,6 +232,38 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args.quiet:
         _print_summary(report)
+    return 0
+
+
+def _make_favorites(config, args, catalog, sizes, log) -> int:
+    if not sizes:
+        print(
+            "error: --make-favorites needs the size catalogue, but sizes.enabled is false",
+            file=sys.stderr,
+        )
+        return 3
+
+    target = config.resolve_favorites(args.favorites if isinstance(args.favorites, str) else None)
+    document = build_favorites(catalog.entries, sizes, count=args.make_favorites)
+    satellites = document["satellites"]
+    if not satellites:
+        print(
+            "error: no satellite in the configured groups has a usable size",
+            file=sys.stderr,
+        )
+        return 3
+
+    existed = target.exists()
+    write_favorites(target, document, indent=config.output.indent)
+    log(
+        f"Favourites  : {len(satellites)} of {args.make_favorites} requested"
+        + ("" if len(satellites) == args.make_favorites else " (no more were found)")
+    )
+    for entry in satellites[:5]:
+        log(f"              {entry['max_m']:6.1f} m  {entry['norad_id']:>6}  {entry['name']}")
+    if len(satellites) > 5:
+        log(f"              … and {len(satellites) - 5} more")
+    log(f"{'Replaced' if existed else 'Written'}    : {target}")
     return 0
 
 

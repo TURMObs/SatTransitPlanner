@@ -92,10 +92,23 @@ of those groups carries cannot be searched. Rather than pass over it, the run
 says which ids were missed and whether they were absent or merely had stale
 elements, and the result file records the same under `catalog.favorites`.
 
-### How favorites.json was chosen
+### Regenerating the list
 
-From GCAT: the largest span, in orbits below 2000 km, among objects CelesTrak
-still tracks, one entry per satellite family. Three things had to be excluded
+```bash
+python -m sattransit -c config.json --make-favorites          # 60, the default
+python -m sattransit -c config.json --make-favorites 100
+python -m sattransit -c config.json --favorites mine.json --make-favorites 25
+```
+
+This rebuilds the list and exits without searching, so it needs no `--start`.
+It writes to the file named by `--favorites`, else to `favorites.file` from the
+config, replacing what is there. Worth re-running now and then: GCAT gains
+dimensions for new objects, and large satellites keep launching.
+
+### How the list is chosen
+
+The largest span, in orbits below 2000 km, among the satellites the configured
+groups carry, one entry per satellite family. Three things have to be excluded
 for the list to mean anything:
 
 - **Tethers and wire antennas.** The largest spans in GCAT are things like
@@ -111,6 +124,12 @@ for the list to mean anything:
 Assembled stations are catalogued once per module, so the list carries the id
 people actually track — 25544 for the ISS, 48274 for the CSS — and not its
 siblings, which would otherwise transit at the same moment as duplicates.
+
+The orbit comes from the current elements, not from the size catalogue, which
+records the orbit an object had when its entry was written. APSTAR-6E is the
+cautionary case: GCAT lists the transfer orbit it launched into, perigee 228 km,
+while the satellite has long since been raised to geostationary — trusting the
+catalogue would put it in a list of low-orbit targets.
 
 ## Viewing the results
 
