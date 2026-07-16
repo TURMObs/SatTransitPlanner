@@ -70,7 +70,7 @@ def _no_ambient_credentials(monkeypatch):
 
 
 def test_the_query_asks_only_for_rocket_bodies_in_low_orbit(config):
-    path = query_path(config)
+    path = urllib.parse.unquote(query_path(config))
     assert "/OBJECT_TYPE/ROCKET BODY" in path
     assert "/MEAN_MOTION/>11.25" in path  # a period under ~128 min
     assert "/DECAY_DATE/null-val" in path  # still in orbit
@@ -79,43 +79,120 @@ def test_the_query_asks_only_for_rocket_bodies_in_low_orbit(config):
 
 def test_the_low_orbit_cut_is_configurable(config):
     config.min_mean_motion = 12.0
-    assert "/MEAN_MOTION/>12.0" in query_path(config)
+    assert "/MEAN_MOTION/>12.0" in urllib.parse.unquote(query_path(config))
 
 
-def test_the_query_is_not_escaped_twice(config, monkeypatch):
-    # The query travels as a form value, so urlencode escapes it on the way
-    # out. Escaping it here as well would send the text "ROCKET%20BODY".
-    sent = {}
+def test_the_query_is_a_well_formed_url(config):
+    # Space-Track answered 400 when this carried a raw space and a raw '>'.
+    path = query_path(config)
+    assert " " not in path
+    assert "ROCKET%20BODY" in path
+    assert "%3E11.25" in path
+    assert "%25" not in path  # escaped once, not twice
 
-    def fake_urlopen(request, timeout=None):
-        sent["body"] = request.data.decode()
-        raise AssertionError("stop here")
 
-    monkeypatch.setattr(spacetrack.urllib.request, "urlopen", fake_urlopen)
+def test_login_and_query_are_separate_requests(config, monkeypatch):
+    # Passing the query alongside the login nests a URL inside a form field,
+    # where it has to survive being escaped twice. Fetch the URL instead.
+    calls = []
+
+    class FakeOpener:
+        addheaders = []
+
+        def open(self, url, data=None, timeout=None):
+            calls.append((url, data))
+            raise AssertionError("stop here")
+
+    monkeypatch.setattr(spacetrack.urllib.request, "build_opener", lambda *a: FakeOpener())
     with pytest.raises(AssertionError):
         spacetrack._fetch(config, "someone", "secret")
 
-    body = sent["body"]
-    assert "%25" not in body, "something was escaped twice"
-    decoded = urllib.parse.parse_qs(body)["query"][0]
-    assert "OBJECT_TYPE/ROCKET BODY" in decoded  # a real space arrives
-    assert "MEAN_MOTION/>11.25" in decoded  # a real > arrives
+    url, data = calls[0]
+    assert url.endswith("/ajaxauth/login")
+    assert "password=secret" in data.decode()
+    assert "query=" not in data.decode()  # no URL nested in the form
 
 
-def test_the_password_is_sent_as_a_form_field_not_in_the_url(config, monkeypatch):
-    seen = {}
+def test_the_password_never_reaches_the_url(config, monkeypatch):
+    calls = []
 
-    def fake_urlopen(request, timeout=None):
-        seen["url"] = request.full_url
-        seen["body"] = request.data.decode()
-        raise AssertionError("stop here")
+    class FakeOpener:
+        addheaders = []
 
-    monkeypatch.setattr(spacetrack.urllib.request, "urlopen", fake_urlopen)
+        def open(self, url, data=None, timeout=None):
+            calls.append(url)
+            raise AssertionError("stop here")
+
+    monkeypatch.setattr(spacetrack.urllib.request, "build_opener", lambda *a: FakeOpener())
     with pytest.raises(AssertionError):
         spacetrack._fetch(config, "someone@example.org", "hunter2")
-    assert "hunter2" not in seen["url"]
-    assert seen["url"].endswith("/ajaxauth/login")
-    assert "password=hunter2" in seen["body"]
+    assert all("hunter2" not in url for url in calls)
+
+
+def test_an_error_repeats_what_space_track_said(config, monkeypatch):
+    # Their message is the only thing that explains a 400, so it must survive.
+    import io
+    import urllib.error
+
+    class FakeOpener:
+        addheaders = []
+
+        def open(self, url, data=None, timeout=None):
+            raise urllib.error.HTTPError(
+                url, 400, "Bad Request", {}, io.BytesIO(b"invalid predicate for class gp")
+            )
+
+    monkeypatch.setattr(spacetrack.urllib.request, "build_opener", lambda *a: FakeOpener())
+    with pytest.raises(SpaceTrackError, match="invalid predicate"):
+        spacetrack._fetch(config, "someone", "hunter2")
+
+
+def test_an_error_body_cannot_leak_the_password(config, monkeypatch):
+    # A 400 can echo the request back, password and all.
+    import io
+    import urllib.error
+
+    class FakeOpener:
+        addheaders = []
+
+        def open(self, url, data=None, timeout=None):
+            raise urllib.error.HTTPError(
+                url, 400, "Bad", {}, io.BytesIO(b"bad request: password=hunter2 rejected")
+            )
+
+    monkeypatch.setattr(spacetrack.urllib.request, "build_opener", lambda *a: FakeOpener())
+    with pytest.raises(SpaceTrackError) as excinfo:
+        spacetrack._fetch(config, "someone", "hunter2")
+    assert "hunter2" not in str(excinfo.value)
+    assert "***" in str(excinfo.value)
+
+
+def test_a_refused_login_is_reported_before_the_query(config, monkeypatch):
+    # Space-Track answers a bad login with 200 and a body saying so.
+    class FakeOpener:
+        addheaders = []
+
+        def open(self, url, data=None, timeout=None):
+            assert url.endswith("/ajaxauth/login"), "must not query after a refused login"
+            return _Response(b'{"Login":"Failed"}')
+
+    monkeypatch.setattr(spacetrack.urllib.request, "build_opener", lambda *a: FakeOpener())
+    with pytest.raises(SpaceTrackError, match="refused the login"):
+        spacetrack._fetch(config, "someone", "wrong")
+
+
+class _Response:
+    def __init__(self, body):
+        self._body = body
+
+    def read(self):
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
 
 
 # --- credentials -------------------------------------------------------------
@@ -133,19 +210,6 @@ def test_missing_credentials_say_what_to_set(monkeypatch, present):
         monkeypatch.setenv(key, value)
     with pytest.raises(SpaceTrackError, match=ENV_IDENTITY):
         credentials()
-
-
-def test_an_http_error_does_not_echo_the_request(config, monkeypatch):
-    import urllib.error
-
-    def fake_urlopen(request, timeout=None):
-        raise urllib.error.HTTPError(request.full_url, 401, "Unauthorized", {}, None)
-
-    monkeypatch.setattr(spacetrack.urllib.request, "urlopen", fake_urlopen)
-    with pytest.raises(SpaceTrackError) as excinfo:
-        spacetrack._fetch(config, "someone", "hunter2")
-    assert "hunter2" not in str(excinfo.value)  # never repeat the password back
-    assert "401" in str(excinfo.value)
 
 
 # --- loading -----------------------------------------------------------------

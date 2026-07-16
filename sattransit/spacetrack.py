@@ -23,6 +23,7 @@ the repository, and results derived from it need the usual citation.
 
 from __future__ import annotations
 
+import http.cookiejar
 import os
 import time
 import urllib.error
@@ -79,48 +80,79 @@ def query_path(config: SpaceTrackConfig) -> str:
     A mean motion above 11.25 revolutions a day is a period under about 128
     minutes, the usual cut for low Earth orbit.
 
-    The space and the ``>`` are left as they are. This whole string is sent as
-    the value of a form field, so urlencode escapes it once on the way out;
-    escaping it here too would deliver the literal text "ROCKET%20BODY".
+    This is a URL path and is escaped like one: the space in "ROCKET BODY" and
+    the ``>`` have to travel as %20 and %3E, or the request is malformed.
     """
+    object_type = urllib.parse.quote("ROCKET BODY")
+    above = urllib.parse.quote(f">{config.min_mean_motion}")
     return (
         "/basicspacedata/query/class/gp"
-        "/OBJECT_TYPE/ROCKET BODY"
+        f"/OBJECT_TYPE/{object_type}"
         "/DECAY_DATE/null-val"
-        f"/MEAN_MOTION/>{config.min_mean_motion}"
+        f"/MEAN_MOTION/{above}"
         "/orderby/NORAD_CAT_ID/format/json"
     )
 
 
-def _fetch(config: SpaceTrackConfig, identity: str, password: str) -> str:
-    """One request: Space-Track accepts a query alongside the login."""
-    url = config.base_url.rstrip("/") + "/ajaxauth/login"
-    payload = urllib.parse.urlencode(
-        {
-            "identity": identity,
-            "password": password,
-            "query": config.base_url.rstrip("/") + query_path(config),
-        }
-    ).encode()
-    request = urllib.request.Request(url, data=payload, headers={"User-Agent": USER_AGENT})
+def _scrub(text: str, password: str) -> str:
+    """Keep the password out of anything that gets printed."""
+    return text.replace(password, "***") if password else text
+
+
+def _explain(code: int) -> str:
+    if code in (401, 403):
+        return f"  The credentials were rejected; check {ENV_IDENTITY} and {ENV_PASSWORD}."
+    if code == 429:
+        return "  Their limit is 30 requests a minute and one GP query an hour."
+    if code == 400:
+        return "  Space-Track rejected the query as malformed."
+    return ""
+
+
+def _open(opener, url: str, password: str, data: bytes | None = None, timeout: int = 180) -> str:
     try:
-        with urllib.request.urlopen(request, timeout=180) as response:
+        with opener.open(url, data=data, timeout=timeout) as response:
             return response.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as exc:
-        # The body may echo the request, so it is not repeated here.
+        # Their message says what is actually wrong, so it is worth repeating —
+        # scrubbed, since a 400 can echo the request back.
+        try:
+            body = " ".join(exc.read().decode("utf-8", errors="replace").split())[:300]
+        except Exception:
+            body = ""
+        detail = f"\n  it said: {_scrub(body, password)}" if body else ""
         raise SpaceTrackError(
-            f"Space-Track returned HTTP {exc.code}."
-            + (
-                "  The credentials were rejected; check "
-                f"{ENV_IDENTITY} and {ENV_PASSWORD}."
-                if exc.code in (401, 403)
-                else "  Their limit is 30 requests a minute and one GP query an hour."
-                if exc.code == 429
-                else ""
-            )
+            f"Space-Track returned HTTP {exc.code}.{_explain(exc.code)}{detail}"
         ) from exc
     except urllib.error.URLError as exc:
         raise SpaceTrackError(f"could not reach Space-Track: {exc.reason}") from exc
+
+
+def _fetch(config: SpaceTrackConfig, identity: str, password: str) -> str:
+    """Log in, then run the query.
+
+    Two requests rather than passing the query alongside the login. That form
+    nests a URL inside a form field, where it has to survive being escaped
+    twice and is easy to get wrong; fetching the URL directly leaves no room
+    for the ambiguity.
+    """
+    jar = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+    opener.addheaders = [("User-Agent", USER_AGENT)]
+
+    base = config.base_url.rstrip("/")
+    login = urllib.parse.urlencode({"identity": identity, "password": password}).encode()
+    answer = _open(opener, base + "/ajaxauth/login", password, data=login, timeout=60)
+    # A rejected login comes back 200 with a body saying so, not as an error.
+    # Only the wording is checked: a missing cookie would be caught by the query
+    # failing anyway, and treating it as fatal here could reject a good login.
+    if "fail" in answer.lower():
+        raise SpaceTrackError(
+            "Space-Track refused the login.\n"
+            f"  it said: {_scrub(' '.join(answer.split())[:200], password) or '(nothing)'}\n"
+            f"  Check {ENV_IDENTITY} and {ENV_PASSWORD}, and that the account is active."
+        )
+    return _open(opener, base + query_path(config), password)
 
 
 def _age_days(path: Path) -> float:
