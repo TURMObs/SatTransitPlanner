@@ -30,14 +30,43 @@ tests/             the test suite (no network, no display)
 
 ## Install
 
+New to Python? This takes you from nothing to a first prediction. You need
+**Python 3.10 or newer** and **git**; check with `python3 --version`.
+
 ```bash
-pip install -e .          # the search: skyfield, numpy
-pip install -e '.[gui]'   # and the PyQt6 viewer
+# 1. get the code
+git clone https://github.com/TURMObs/SatTransitPlanner.git
+cd SatTransitPlanner
+
+# 2. make a virtual environment — an isolated place for this tool's
+#    dependencies, so they cannot disturb any other Python on your machine
+python3 -m venv .venv
+source .venv/bin/activate           # Windows: .venv\Scripts\activate
+
+# 3. install the tool and its viewer into that environment
+pip install -e ".[gui]"
+
+# 4. describe your observatory
+cp config.example.json config.json  # Windows: copy config.example.json config.json
+#    then open config.json and set your latitude, longitude, elevation and
+#    timezone (see Configuration below)
+
+# 5. run a first prediction. The first run downloads orbital elements and a
+#    small ephemeris (~25 MB) and takes a couple of minutes; later runs reuse
+#    the cache and are fast.
+sattransit --start now --duration 12h
+sattransit-gui                      # open the results in the viewer
 ```
 
-This puts `sattransit` and `sattransit-gui` on the path, so the examples below
-also work without the `python -m` prefix. To run straight from a checkout
-without installing, `pip install -r requirements.txt` covers the dependencies.
+The environment stays until you delete `.venv`. Each new terminal session,
+re-activate it with `source .venv/bin/activate` (or `.venv\Scripts\activate` on
+Windows) before running `sattransit`.
+
+Installing puts `sattransit` and `sattransit-gui` on the path, which is why the
+examples drop the `python -m` prefix. Leave off `[gui]` if you only need the
+search; to run from a checkout without installing at all, `pip install -r
+requirements.txt` covers the dependencies and you invoke it as
+`python -m sattransit`.
 
 | Dependency | Needed for |
 |------------|------------|
