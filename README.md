@@ -7,7 +7,10 @@ ephemeris), orbital elements from [CelesTrak](https://celestrak.org/) as OMM in
 JSON, and physical satellite dimensions from [GCAT](https://planet4589.org/space/gcat).
 The observatory and all search options live in a JSON file; the observation
 window is given on the command line. The result is a JSON document describing
-every event.
+every event, and a Qt viewer draws them.
+
+![The viewer: an event list with apparent size, the satellite's chord across the
+solar disk, and an all-sky plot of where each event happens.](docs/viewer-dark.png)
 
 ```
 sattransit/        the package
@@ -20,6 +23,7 @@ sattransit/        the package
 transit_gui.py     wrapper -> viewer, without -m
 config.example.json  template for your site configuration
 favorites.json     a ready-made list of large satellites to search
+pyproject.toml     packaging: dependencies and the two console commands
 tests/             the test suite (no network, no display)
 ```
 
@@ -27,13 +31,18 @@ tests/             the test suite (no network, no display)
 ## Install
 
 ```bash
-pip install -r requirements.txt
+pip install -e .          # the search: skyfield, numpy
+pip install -e '.[gui]'   # and the PyQt6 viewer
 ```
+
+This puts `sattransit` and `sattransit-gui` on the path, so the examples below
+also work without the `python -m` prefix. To run straight from a checkout
+without installing, `pip install -r requirements.txt` covers the dependencies.
 
 | Dependency | Needed for |
 |------------|------------|
 | skyfield, numpy | always (the search) |
-| PyQt6 | the viewer |
+| PyQt6 | the viewer (`[gui]` extra) |
 
 ## Use
 

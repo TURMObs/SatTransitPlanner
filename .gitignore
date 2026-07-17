@@ -4,6 +4,12 @@ __pycache__/
 .venv/
 venv/
 
+# Packaging build artifacts (from pip wheel / build / pip install -e).
+build/
+dist/
+*.egg-info/
+*.egg
+
 # Local machine state, not shared: it records absolute paths from this checkout.
 .claude/settings.local.json
 

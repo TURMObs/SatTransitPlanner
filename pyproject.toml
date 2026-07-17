@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sattransit"
+description = "Predict satellites transiting the solar disk from a fixed observatory."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "Robert Roth", email = "robert.roth@physik.tu-darmstadt.de" }]
+keywords = ["astronomy", "satellites", "solar transit", "skyfield", "celestrak"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Astronomy",
+]
+# The search needs only these; the viewer's PyQt6 is an optional extra below.
+dependencies = ["skyfield>=1.49", "numpy>=1.24"]
+dynamic = ["version"]
+
+[project.optional-dependencies]
+gui = ["PyQt6>=6.6"]
+dev = ["pytest>=7", "pyflakes>=3"]
+
+[project.urls]
+Homepage = "https://github.com/TURMObs/SatTransitPlanner"
+Repository = "https://github.com/TURMObs/SatTransitPlanner"
+
+[project.scripts]
+# `sattransit ...` and `sattransit-gui ...` once installed, no `python -m` needed.
+sattransit = "sattransit.cli:main"
+sattransit-gui = "sattransit.gui:main"
+
+[tool.setuptools]
+packages = ["sattransit"]
+
+[tool.setuptools.dynamic]
+# One source of truth for the version: sattransit/__init__.py.
+version = { attr = "sattransit.__version__" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
