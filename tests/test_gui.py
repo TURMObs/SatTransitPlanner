@@ -42,7 +42,7 @@ TRANSIT = {
         "time_local": "2026-07-16T16:43:55.699+02:00",
         "separation_arcsec": 260.9,
         "separation_deg": 0.072481,
-        "sun_radius_arcsec": 943.8,
+        "target_radius_arcsec": 943.8,
         "chord_offset_fraction": 0.2765,
         "position_angle_deg": 48.83,
     },
@@ -56,8 +56,8 @@ TRANSIT = {
     "geometry": {
         "satellite_altitude_deg": 41.4847,
         "satellite_azimuth_deg": 254.9898,
-        "sun_altitude_deg": 41.4125,
-        "sun_azimuth_deg": 254.9986,
+        "target_altitude_deg": 41.4125,
+        "target_azimuth_deg": 254.9986,
         "range_km": 986.738,
         "angular_velocity_deg_per_s": 0.43752,
         "motion_position_angle_deg": 318.77,
@@ -79,7 +79,8 @@ NEAR_MISS = {
 }
 
 REPORT = {
-    "schema_version": 1,
+    "schema_version": 2,
+    "target": "sun",
     "observatory": {"name": "Example Observatory", "timezone": "Europe/Berlin"},
     "observation_window": {
         "start_local": "2026-07-16T04:00:00+02:00",
@@ -572,3 +573,58 @@ def test_size_filter_is_cleared_by_reset(app):
     window._reset_filters()
     assert len(_names(window)) == 4
     assert window._min_size.text() == "any"
+
+
+# --- schema upgrade and lunar reports ----------------------------------------
+
+MOON_TRANSIT = {
+    **TRANSIT,
+    "closest_approach": {**TRANSIT["closest_approach"], "target_radius_arcsec": 940.0},
+    "illumination": {
+        "phase_deg": 98.0, "illuminated_fraction": 0.44,
+        "bright_limb_angle_deg": 294.0, "limb": "dark", "satellite_sunlit": True,
+    },
+}
+MOON_REPORT = {**REPORT, "target": "moon", "events": [MOON_TRANSIT]}
+
+
+def test_an_old_v1_report_is_upgraded_on_load(tmp_path):
+    # Version 1 named the disk after the Sun; the loader renames those fields.
+    v1 = {
+        "schema_version": 1,
+        "observatory": {"name": "Old", "timezone": "UTC"},
+        "observation_window": {"start_local": "2026-07-16T04:00:00Z",
+                               "end_local": "2026-07-16T20:00:00Z"},
+        "statistics": {"disk_transits": 1, "near_misses": 0},
+        "events": [{
+            **TRANSIT,
+            "closest_approach": {k: v for k, v in TRANSIT["closest_approach"].items()
+                                 if k != "target_radius_arcsec"} | {"sun_radius_arcsec": 943.8},
+            "geometry": {k: v for k, v in TRANSIT["geometry"].items()
+                         if k not in ("target_altitude_deg", "target_azimuth_deg")}
+                        | {"sun_altitude_deg": 41.4, "sun_azimuth_deg": 255.0},
+        }],
+    }
+    path = tmp_path / "old.json"
+    path.write_text(json.dumps(v1))
+    report = load_report(path)
+
+    assert report["target"] == "sun"  # defaulted
+    ca = report["events"][0]["closest_approach"]
+    assert "target_radius_arcsec" in ca and "sun_radius_arcsec" not in ca
+    geo = report["events"][0]["geometry"]
+    assert geo["target_altitude_deg"] == 41.4 and "sun_altitude_deg" not in geo
+
+
+def test_a_lunar_report_opens_and_paints(app):
+    window = ViewerWindow(THEMES["dark"], apply_theme(app, "dark"), MOON_REPORT, "moon.json")
+    window.resize(1120, 720)
+    assert window._table.rowCount() == 1
+    assert not window.grab().isNull()
+
+
+def test_the_disk_view_paints_a_lunar_event(app):
+    view = DiskView(THEMES["dark"])
+    view.resize(400, 360)
+    view.set_event(MOON_TRANSIT)
+    assert not view.grab().isNull()

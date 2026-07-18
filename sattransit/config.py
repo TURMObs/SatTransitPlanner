@@ -44,10 +44,11 @@ class CelestrakConfig:
 
 @dataclass
 class SearchConfig:
-    # Angular radius around the Sun's center within which an approach is reported.
-    # null/None means "solar limb", i.e. only true disk transits are reported.
+    # Angular radius around the target's center within which an approach is
+    # reported. null/None means "the target's limb", i.e. only true disk
+    # transits are reported.
     max_separation_deg: float | None = 1.0
-    min_sun_altitude_deg: float = 5.0
+    min_target_altitude_deg: float = 5.0
     min_satellite_altitude_deg: float = 5.0
     coarse_step_seconds: float = 60.0
     fine_step_seconds: float = 1.0
@@ -95,6 +96,20 @@ class SpaceTrackConfig:
 
 
 @dataclass
+class IlluminationConfig:
+    """Which illumination conditions to keep in the result list.
+
+    Only bites for the Moon: a satellite transiting the Sun is always sunlit,
+    and the whole solar disk is lit, so both filters pass everything for a
+    solar run. The defaults report every event, flagged, and let the
+    configuration exclude what a given observer cannot use.
+    """
+
+    satellite: str = "any"  # any | sunlit | eclipsed
+    limb: str = "any"  # any | lit | dark
+
+
+@dataclass
 class FavoritesConfig:
     file: str = "favorites.json"
 
@@ -108,7 +123,10 @@ class GuiConfig:
 class Config:
     observatory: Observatory
     celestrak: CelestrakConfig
+    # Which body the satellites transit: "sun" (default) or "moon".
+    target: str = "sun"
     search: SearchConfig = field(default_factory=SearchConfig)
+    illumination: IlluminationConfig = field(default_factory=IlluminationConfig)
     sizes: SizesConfig = field(default_factory=SizesConfig)
     spacetrack: SpaceTrackConfig = field(default_factory=SpaceTrackConfig)
     favorites: FavoritesConfig = field(default_factory=FavoritesConfig)
@@ -182,8 +200,8 @@ def load_config(path: str | Path) -> Config:
         raise ConfigError(f"{path}: top level must be a JSON object")
 
     known_top = {
-        "observatory", "celestrak", "search", "sizes", "spacetrack", "favorites", "output",
-        "gui", "cache_dir", "ephemeris",
+        "observatory", "celestrak", "target", "search", "illumination", "sizes", "spacetrack",
+        "favorites", "output", "gui", "cache_dir", "ephemeris",
     }
     unknown = set(raw) - known_top
     if unknown:
@@ -199,7 +217,9 @@ def load_config(path: str | Path) -> Config:
     config = Config(
         observatory=_build(Observatory, raw["observatory"], "observatory"),
         celestrak=_build(CelestrakConfig, raw["celestrak"], "celestrak"),
+        target=raw.get("target", "sun"),
         search=_build(SearchConfig, raw.get("search", {}), "search"),
+        illumination=_build(IlluminationConfig, raw.get("illumination", {}), "illumination"),
         sizes=_build(SizesConfig, raw.get("sizes", {}), "sizes"),
         spacetrack=_build(SpaceTrackConfig, raw.get("spacetrack", {}), "spacetrack"),
         favorites=_build(FavoritesConfig, raw.get("favorites", {}), "favorites"),
@@ -253,6 +273,21 @@ def _validate(config: Config) -> None:
         raise ConfigError("spacetrack.max_age_days: must be positive")
     if config.spacetrack.min_mean_motion <= 0:
         raise ConfigError("spacetrack.min_mean_motion: must be positive")
+
+    if config.target not in ("sun", "moon"):
+        raise ConfigError(f"target: must be 'sun' or 'moon', not {config.target!r}")
+    if config.search.min_target_altitude_deg < -90 or config.search.min_target_altitude_deg > 90:
+        raise ConfigError("search.min_target_altitude_deg: must be within [-90, 90]")
+
+    if config.illumination.satellite not in ("any", "sunlit", "eclipsed"):
+        raise ConfigError(
+            f"illumination.satellite: must be 'any', 'sunlit' or 'eclipsed', "
+            f"not {config.illumination.satellite!r}"
+        )
+    if config.illumination.limb not in ("any", "lit", "dark"):
+        raise ConfigError(
+            f"illumination.limb: must be 'any', 'lit' or 'dark', not {config.illumination.limb!r}"
+        )
 
     if config.gui.theme not in ("dark", "light"):
         raise ConfigError(f"gui.theme: must be 'dark' or 'light', not {config.gui.theme!r}")

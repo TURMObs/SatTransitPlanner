@@ -38,7 +38,7 @@ from . import __version__
 from .config import SpaceTrackConfig
 from .elements import CatalogEntry, GroupSource, _build_satellite, parse_records
 
-USER_AGENT = f"SatTransitPlanner/{__version__} (+satellite solar transit prediction)"
+USER_AGENT = f"SatTransitPlanner/{__version__} (+satellite transit prediction)"
 
 ENV_IDENTITY = "SPACETRACK_IDENTITY"
 ENV_PASSWORD = "SPACETRACK_PASSWORD"

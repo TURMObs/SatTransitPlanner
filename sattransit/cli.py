@@ -13,6 +13,7 @@ from skyfield.api import Loader
 from . import __version__
 from .config import DEFAULT_CONFIG_FILE, ConfigError, load_config
 from .finder import TransitFinder
+from .target import Target
 from .report import build_report
 from .sizes import SizeError, load_catalogue
 from .spacetrack import SpaceTrackError, load_rocket_bodies, merge
@@ -50,6 +51,12 @@ def build_parser() -> argparse.ArgumentParser:
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--end", help="end of the observation window (ISO 8601)")
     group.add_argument("--duration", help="length of the window, e.g. 12h, 90min, 2d")
+
+    parser.add_argument(
+        "--target",
+        choices=("sun", "moon"),
+        help="the body the satellites transit (default: the config's target, else sun)",
+    )
 
     parser.add_argument(
         "--favorites",
@@ -104,6 +111,8 @@ def main(argv: list[str] | None = None) -> int:
         config = load_config(args.config)
         if args.offline:
             config.celestrak.offline = True
+        if args.target:
+            config.target = args.target
 
         tz = config.observatory.zoneinfo()
         if not making:
@@ -120,6 +129,7 @@ def main(argv: list[str] | None = None) -> int:
 
     log(f"Observatory : {config.observatory.name}")
     if not making:
+        log(f"Target      : {config.target}")
         log(
             f"Window      : {start_dt.astimezone(tz).isoformat(timespec='seconds')} .. "
             f"{end_dt.astimezone(tz).isoformat(timespec='seconds')} "
@@ -229,7 +239,8 @@ def main(argv: list[str] | None = None) -> int:
         )
     )
 
-    finder = TransitFinder(config, ephemeris, timescale, sizes)
+    target = Target(config.target, ephemeris)
+    finder = TransitFinder(config, ephemeris, timescale, target, sizes)
     events = finder.search(
         catalog.entries,
         timescale.from_datetime(start_dt),
@@ -327,10 +338,14 @@ def _print_summary(report: dict) -> None:
     if not events:
         return
 
+    # For the Moon, an extra column says which limb and whether the satellite
+    # is lit — the difference between a workable pass and an invisible one.
+    lunar = report.get("target") == "moon"
     print(file=sys.stderr)
     header = (
         f"{'local time':<30} {'type':<12} {'satellite':<26} "
         f"{'size':>7} {'sep':>9} {'dur':>7} {'alt':>6}"
+        + (f"  {'lunar':<14}" if lunar else "")
     )
     print(header, file=sys.stderr)
     print("-" * len(header), file=sys.stderr)
@@ -340,6 +355,11 @@ def _print_summary(report: dict) -> None:
         # What the satellite's longest dimension subtends: how big it looks.
         size = event.get("size")
         apparent = f"{size['angular_max_arcsec']:.2f}\"" if size else "-"
+        lunar_col = ""
+        lit = event.get("illumination")
+        if lunar and lit:
+            sat = "sunlit" if lit["satellite_sunlit"] else "eclipsed"
+            lunar_col = f"  {lit['limb'] + ' limb':<8} {sat}"
         print(
             f"{event['closest_approach']['time_local']:<30} "
             f"{event['type']:<12} "
@@ -347,7 +367,8 @@ def _print_summary(report: dict) -> None:
             f"{apparent:>7} "
             f"{event['closest_approach']['separation_arcsec']:>8.0f}\" "
             f"{duration:>7} "
-            f"{event['geometry']['satellite_altitude_deg']:>5.1f}°",
+            f"{event['geometry']['satellite_altitude_deg']:>5.1f}°"
+            f"{lunar_col}",
             file=sys.stderr,
         )
 

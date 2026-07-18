@@ -1,4 +1,4 @@
-"""Search for satellite passages in front of (or close to) the solar disk.
+"""Search for satellite passages in front of (or close to) a target's disk (Sun or Moon).
 
 The search runs in three stages so that it stays both fast and safe for
 low-Earth-orbit satellites, whose apparent motion can exceed 1 deg/s:
@@ -31,8 +31,8 @@ from skyfield.vectorlib import VectorSum
 from .config import Config
 from .elements import CatalogEntry
 from .sizes import Size, parse_overrides, resolve
+from .target import Illumination, Target, bright_limb_angle_deg, limb_side
 
-SUN_RADIUS_KM = 695700.0
 GOLDEN_RATIO_INV = (math.sqrt(5.0) - 1.0) / 2.0
 DEG_TO_ARCSEC = 3600.0
 
@@ -52,16 +52,17 @@ class Event:
     is_transit: bool
     closest_time: datetime
     separation_deg: float
-    sun_radius_deg: float
+    target_radius_deg: float
     position_angle_deg: float
     satellite_altitude_deg: float
     satellite_azimuth_deg: float
-    sun_altitude_deg: float
-    sun_azimuth_deg: float
+    target_altitude_deg: float
+    target_azimuth_deg: float
     range_km: float
     angular_velocity_deg_per_s: float
     motion_position_angle_deg: float
     size: Size | None
+    illumination: Illumination | None = None
     start_time: datetime | None = None
     end_time: datetime | None = None
     duration_seconds: float | None = None
@@ -69,21 +70,22 @@ class Event:
 
 
 class TransitFinder:
-    """Finds solar transits and near misses for a fixed observing site."""
+    """Finds transits of a target (the Sun or Moon) for a fixed observing site."""
 
     def __init__(
         self,
         config: Config,
         ephemeris: SpiceKernel,
         timescale: Timescale,
+        target: Target,
         sizes: dict[int, Size] | None = None,
     ):
         self.config = config
+        self.target = target
         self.sizes = sizes or {}
         self.size_overrides = parse_overrides(config.search.satellite_sizes_m)
         self.ts = timescale
         self.eph = ephemeris
-        self.sun = ephemeris["sun"]
         obs = config.observatory
         self.site = wgs84.latlon(
             latitude_degrees=obs.latitude_deg,
@@ -92,20 +94,22 @@ class TransitFinder:
         )
         self.observer: VectorSum = ephemeris["earth"] + self.site
 
-    # ------------------------------------------------------------------ Sun
+    # --------------------------------------------------------------- target
+
+    def _target_apparent(self, t):
+        return self.observer.at(t).observe(self.target.body).apparent()
 
     def _sun_apparent(self, t):
-        return self.observer.at(t).observe(self.sun).apparent()
+        return self.observer.at(t).observe(self.target.sun).apparent()
 
-    def sun_radius_deg(self, distance_au: float) -> float:
-        distance_km = distance_au * 149597870.7
-        return math.degrees(math.asin(SUN_RADIUS_KM / distance_km))
+    def target_radius_deg(self, distance_au: float) -> float:
+        return self.target.apparent_radius_deg(distance_au)
 
     # --------------------------------------------------------- separations
 
     def _separation_deg(self, satellite: EarthSatellite, t) -> np.ndarray:
         topocentric = (satellite - self.site).at(t)
-        return topocentric.separation_from(self._sun_apparent(t)).degrees
+        return topocentric.separation_from(self._target_apparent(t)).degrees
 
     def _separation_at_jd(self, satellite: EarthSatellite, jd: float) -> float:
         return float(self._separation_deg(satellite, self.ts.tt_jd(jd)))
@@ -122,18 +126,18 @@ class TransitFinder:
         search = self.config.search
 
         coarse = self._coarse_grid(start, end, search.coarse_step_seconds)
-        sun_apparent = self._sun_apparent(coarse)
-        sun_alt, sun_az, sun_distance = sun_apparent.altaz()
-        sun_up = sun_alt.degrees >= search.min_sun_altitude_deg
+        target_apparent = self._target_apparent(coarse)
+        target_alt, _, _ = target_apparent.altaz()
+        target_up = target_alt.degrees >= search.min_target_altitude_deg
 
         events: list[Event] = []
-        if not sun_up.any():
+        if not target_up.any():
             progress(len(entries), len(entries), 0)
             return events
 
         coarse_jd = coarse.tt
         for index, entry in enumerate(entries, start=1):
-            events.extend(self._search_one(entry, coarse, coarse_jd, sun_apparent, sun_up))
+            events.extend(self._search_one(entry, coarse, coarse_jd, target_apparent, target_up))
             progress(index, len(entries), len(events))
 
         events.sort(key=lambda e: e.closest_time)
@@ -150,17 +154,17 @@ class TransitFinder:
         entry: CatalogEntry,
         coarse,
         coarse_jd: np.ndarray,
-        sun_apparent,
-        sun_up: np.ndarray,
+        target_apparent,
+        target_up: np.ndarray,
     ) -> list[Event]:
         search = self.config.search
         satellite = entry.satellite
 
         topocentric = (satellite - self.site).at(coarse)
         alt, _, _ = topocentric.altaz()
-        separation = topocentric.separation_from(sun_apparent).degrees
+        separation = topocentric.separation_from(target_apparent).degrees
 
-        visible = sun_up & (alt.degrees >= search.min_satellite_altitude_deg)
+        visible = target_up & (alt.degrees >= search.min_satellite_altitude_deg)
         if not visible.any():
             return []
 
@@ -184,9 +188,9 @@ class TransitFinder:
     def _threshold_gate(self) -> float:
         """Upper bound on the separation that could still yield an event."""
         limit = self.config.search.max_separation_deg
-        # The Sun's apparent radius never exceeds ~0.28 deg; use it when the
-        # configuration asks for limb-defined transits only.
-        return limit if limit is not None else 0.28
+        # When the configuration asks for limb-defined transits only, fall back
+        # to the largest the target's disk ever gets.
+        return limit if limit is not None else self.target.max_radius_deg
 
     def _candidate_brackets(
         self,
@@ -271,11 +275,11 @@ class TransitFinder:
         separation_deg = self._separation_at_jd(satellite, best_jd)
 
         t = self.ts.tt_jd(best_jd)
-        sun_apparent = self._sun_apparent(t)
-        sun_alt, sun_az, sun_distance = sun_apparent.altaz()
-        sun_radius = self.sun_radius_deg(float(sun_distance.au))
+        target_apparent = self._target_apparent(t)
+        target_alt, target_az, target_distance = target_apparent.altaz()
+        target_radius = self.target_radius_deg(float(target_distance.au))
 
-        limit = search.max_separation_deg if search.max_separation_deg is not None else sun_radius
+        limit = search.max_separation_deg if search.max_separation_deg is not None else target_radius
         if separation_deg > limit:
             return None
 
@@ -283,59 +287,105 @@ class TransitFinder:
         sat_alt, sat_az, sat_range = topocentric.altaz()
 
         # The refined minimum may have drifted outside the visibility window.
-        if float(sun_alt.degrees) < search.min_sun_altitude_deg:
+        if float(target_alt.degrees) < search.min_target_altitude_deg:
             return None
         if float(sat_alt.degrees) < search.min_satellite_altitude_deg:
             return None
 
-        dx, dy = self._offsets_arcsec(satellite, t, sun_apparent)
+        dx, dy = self._offsets_arcsec(satellite, t, target_apparent)
         position_angle = _position_angle(dx, dy)
-        velocity, motion_pa = self._motion(satellite, best_jd, sun_apparent)
+        velocity, motion_pa = self._motion(satellite, best_jd, target_apparent)
 
-        is_transit = separation_deg <= sun_radius
+        illumination = self._illumination(satellite, t, target_apparent, position_angle)
+        if not self._illumination_wanted(illumination):
+            return None
+
+        is_transit = separation_deg <= target_radius
         event = Event(
             entry=entry,
             is_transit=is_transit,
             closest_time=t.utc_datetime(),
             separation_deg=separation_deg,
-            sun_radius_deg=sun_radius,
+            target_radius_deg=target_radius,
             position_angle_deg=position_angle,
             satellite_altitude_deg=float(sat_alt.degrees),
             satellite_azimuth_deg=float(sat_az.degrees),
-            sun_altitude_deg=float(sun_alt.degrees),
-            sun_azimuth_deg=float(sun_az.degrees),
+            target_altitude_deg=float(target_alt.degrees),
+            target_azimuth_deg=float(target_az.degrees),
             range_km=float(sat_range.km),
             angular_velocity_deg_per_s=velocity,
             motion_position_angle_deg=motion_pa,
             size=resolve(entry.norad_id, satellite.name, self.size_overrides, self.sizes),
+            illumination=illumination,
         )
 
         if is_transit:
-            self._add_contacts(event, satellite, best_jd, sun_radius)
+            self._add_contacts(event, satellite, best_jd, target_radius)
         if self.config.output.include_path:
             self._add_path(event, satellite, best_jd)
         return event
+
+    # ---------------------------------------------------------- illumination
+
+    def _illumination(self, satellite, t, target_apparent, position_angle) -> Illumination | None:
+        """How a lunar event is lit; None for the Sun, whose disk is always full.
+
+        The satellite's illumination (sunlit or in Earth's shadow) is needed to
+        tell a visible dark-limb pass from an invisible one, and the phase and
+        bright-limb direction say which limb the crossing is on.
+        """
+        if not self.target.reflective:
+            return None
+
+        sun_apparent = self._sun_apparent(t)
+        bright_angle = bright_limb_angle_deg(target_apparent, sun_apparent)
+        # is_sunlit works on the satellite's geocentric position.
+        satellite_sunlit = bool(satellite.at(t).is_sunlit(self.eph))
+        return Illumination(
+            phase_deg=float(target_apparent.phase_angle(self.target.sun).degrees),
+            illuminated_fraction=float(target_apparent.fraction_illuminated(self.target.sun)),
+            bright_limb_angle_deg=bright_angle,
+            limb=limb_side(position_angle, bright_angle),
+            satellite_sunlit=satellite_sunlit,
+        )
+
+    def _illumination_wanted(self, illumination: Illumination | None) -> bool:
+        """Whether the configured illumination filters keep this event.
+
+        No-ops for the Sun, where illumination is None: a solar transit is
+        always a sunlit silhouette on a fully lit disk.
+        """
+        if illumination is None:
+            return True
+        wanted = self.config.illumination
+        if wanted.satellite == "sunlit" and not illumination.satellite_sunlit:
+            return False
+        if wanted.satellite == "eclipsed" and illumination.satellite_sunlit:
+            return False
+        if wanted.limb != "any" and illumination.limb != wanted.limb:
+            return False
+        return True
 
     def _add_contacts(
         self,
         event: Event,
         satellite: EarthSatellite,
         best_jd: float,
-        sun_radius: float,
+        target_radius: float,
     ) -> None:
         """Locate the limb crossings on either side of the closest approach."""
         if event.angular_velocity_deg_per_s <= 0:
             return
 
         tolerance_jd = self.config.search.refine_tolerance_seconds / 86400.0
-        # Time the satellite needs to cover one solar radius, generously padded:
+        # Time the satellite needs to cover one disk radius, generously padded:
         # the true half-duration cannot exceed this by much even for a central
         # crossing of a slow, high-orbit satellite.
-        half_span_seconds = event.sun_radius_deg / event.angular_velocity_deg_per_s
+        half_span_seconds = event.target_radius_deg / event.angular_velocity_deg_per_s
         max_span_jd = (5.0 * half_span_seconds + 1.0) / 86400.0
 
         def limb(jd: float) -> float:
-            return self._separation_at_jd(satellite, jd) - sun_radius
+            return self._separation_at_jd(satellite, jd) - target_radius
 
         ingress = _limb_contact(limb, best_jd, -1.0, max_span_jd, tolerance_jd)
         egress = _limb_contact(limb, best_jd, +1.0, max_span_jd, tolerance_jd)
@@ -352,15 +402,15 @@ class TransitFinder:
             half_span = event.duration_seconds / 2.0
         elif event.angular_velocity_deg_per_s > 0:
             # For a near miss, show a window wide enough to cross the disk.
-            half_span = event.sun_radius_deg / event.angular_velocity_deg_per_s
+            half_span = event.target_radius_deg / event.angular_velocity_deg_per_s
         else:
             half_span = 30.0
 
         offsets = np.linspace(-half_span, half_span, samples)
         jd = best_jd + offsets / 86400.0
         t = self.ts.tt_jd(jd)
-        sun_apparent = self._sun_apparent(t)
-        dx, dy = self._offsets_arcsec(satellite, t, sun_apparent)
+        target_apparent = self._target_apparent(t)
+        dx, dy = self._offsets_arcsec(satellite, t, target_apparent)
 
         event.path = [
             PathSample(
@@ -373,17 +423,17 @@ class TransitFinder:
             for offset, time, x, y in zip(offsets, t, np.atleast_1d(dx), np.atleast_1d(dy))
         ]
 
-    def _offsets_arcsec(self, satellite: EarthSatellite, t, sun_apparent):
-        """Satellite position relative to the Sun's center, east/north in arcsec."""
+    def _offsets_arcsec(self, satellite: EarthSatellite, t, target_apparent):
+        """Satellite position relative to the target's center, east/north in arcsec."""
         sat_ra, sat_dec, _ = (satellite - self.site).at(t).radec()
-        sun_ra, sun_dec, _ = sun_apparent.radec()
+        tgt_ra, tgt_dec, _ = target_apparent.radec()
 
-        d_ra = _wrap_degrees(sat_ra._degrees - sun_ra._degrees)
-        dx = d_ra * math.cos(math.radians(float(np.mean(sun_dec.degrees)))) * DEG_TO_ARCSEC
-        dy = (sat_dec.degrees - sun_dec.degrees) * DEG_TO_ARCSEC
+        d_ra = _wrap_degrees(sat_ra._degrees - tgt_ra._degrees)
+        dx = d_ra * math.cos(math.radians(float(np.mean(tgt_dec.degrees)))) * DEG_TO_ARCSEC
+        dy = (sat_dec.degrees - tgt_dec.degrees) * DEG_TO_ARCSEC
         return dx, dy
 
-    def _motion(self, satellite: EarthSatellite, jd: float, sun_apparent):
+    def _motion(self, satellite: EarthSatellite, jd: float, target_apparent):
         """Apparent angular speed and direction of travel at the given instant."""
         delta_jd = 0.05 / 86400.0
         t = self.ts.tt_jd(np.array([jd - delta_jd, jd + delta_jd]))

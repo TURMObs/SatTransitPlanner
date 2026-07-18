@@ -223,7 +223,29 @@ def load_report(path: Path) -> dict:
             f"{path} does not look like a SatTransitPlanner result.\n"
             "Generate one with: python -m sattransit --start ... --duration ..."
         )
-    return raw
+    return _upgrade(raw)
+
+
+def _upgrade(report: dict) -> dict:
+    """Bring an older (schema 1, solar-only) result up to the current shape.
+
+    Version 1 named the disk after the Sun (``sun_radius_arcsec`` and so on).
+    Renaming those to ``target_*`` on load means the rest of the viewer only
+    ever deals with one vocabulary.
+    """
+    report.setdefault("target", "sun")
+    renames = {
+        "closest_approach": {"sun_radius_arcsec": "target_radius_arcsec"},
+        "geometry": {"sun_altitude_deg": "target_altitude_deg",
+                     "sun_azimuth_deg": "target_azimuth_deg"},
+    }
+    for event in report.get("events", []):
+        for section, mapping in renames.items():
+            block = event.get(section) or {}
+            for old, new in mapping.items():
+                if old in block and new not in block:
+                    block[new] = block.pop(old)
+    return report
 
 
 # --- Small helpers -----------------------------------------------------------
@@ -376,7 +398,7 @@ class DiskView(QWidget):
         approach = event["closest_approach"]
         x, y = _offsets(approach["separation_arcsec"], approach["position_angle_deg"])
         angle = math.radians(event["geometry"]["motion_position_angle_deg"])
-        reach = approach["sun_radius_arcsec"] * 1.5
+        reach = approach["target_radius_arcsec"] * 1.5
         dx, dy = math.sin(angle) * reach, math.cos(angle) * reach
         return [(x - dx, y - dy), (x + dx, y + dy)]
 
@@ -389,16 +411,16 @@ class DiskView(QWidget):
         if self._event is None:
             painter.setPen(QColor(self._theme["col_subtle"]))
             painter.drawText(
-                rect, Qt.AlignmentFlag.AlignCenter, "Select an event to see its path across the Sun."
+                rect, Qt.AlignmentFlag.AlignCenter, "Select an event to see its path across the disk."
             )
             return
 
         approach = self._event["closest_approach"]
-        sun_radius = approach["sun_radius_arcsec"]
+        disk_radius = approach["target_radius_arcsec"]
         points = self._track_points(self._event)
 
         # Fit the disk and the whole track, whichever reaches further.
-        extent = max([sun_radius * 1.15] + [math.hypot(x, y) * 1.08 for x, y in points])
+        extent = max([disk_radius * 1.15] + [math.hypot(x, y) * 1.08 for x, y in points])
         margin = 34
         span = min(rect.width(), rect.height()) - 2 * margin
         if span <= 0 or extent <= 0:
@@ -410,11 +432,11 @@ class DiskView(QWidget):
             # East is left and north is up, as when looking at the sky.
             return QPointF(cx - x * scale, cy - y * scale)
 
-        radius_px = sun_radius * scale
+        radius_px = disk_radius * scale
         self._draw_sun(painter, cx, cy, radius_px)
         self._draw_track(painter, to_screen, points, cx, cy, radius_px)
         self._draw_marker(painter, to_screen, approach)
-        self._draw_annotations(painter, rect, sun_radius)
+        self._draw_annotations(painter, rect, disk_radius)
 
     def _draw_sun(self, painter, cx, cy, radius_px):
         gradient = QRadialGradient(cx, cy, radius_px)
@@ -483,10 +505,10 @@ class DiskView(QWidget):
         painter.setPen(QPen(QColor(self._theme["marker_ring"]), 1.2))
         painter.drawEllipse(centre, 3.4, 3.4)
 
-    def _draw_annotations(self, painter, rect, sun_radius):
+    def _draw_annotations(self, painter, rect, disk_radius):
         painter.setPen(QColor(self._theme["col_subtle"]))
 
-        painter.drawText(10, 18, f"solar radius {sun_radius:.0f}″  ·  disk ⌀ {sun_radius / 30:.1f}′")
+        painter.drawText(10, 18, f"disk radius {disk_radius:.0f}″  ·  ⌀ {disk_radius / 30:.1f}′")
         painter.drawText(10, rect.height() - 8, "dots mark equal time steps")
 
         # Compass, bottom right so it stays clear of the captions.
@@ -953,7 +975,7 @@ _DETAIL_LAYOUT = [
         "GEOMETRY",
         [
             "Satellite alt/az",
-            "Sun alt/az",
+            "Target alt/az",
             "Range",
             "Angular speed",
             "Direction of travel",
@@ -982,7 +1004,7 @@ def _detail_values(event: dict) -> dict:
         "UTC": _local_time(approach["time_utc"].replace("Z", "+00:00")),
         "Separation": (
             f"{approach['separation_arcsec']:.1f}″ "
-            f"(disk radius {approach['sun_radius_arcsec']:.0f}″)"
+            f"(disk radius {approach['target_radius_arcsec']:.0f}″)"
         ),
         "Chord offset": None if offset is None else f"{offset:.3f} of the radius",
         "Position angle": f"{approach['position_angle_deg']:.1f}°",
@@ -993,8 +1015,8 @@ def _detail_values(event: dict) -> dict:
             f"{geometry['satellite_altitude_deg']:.2f}° / "
             f"{geometry['satellite_azimuth_deg']:.2f}°"
         ),
-        "Sun alt/az": (
-            f"{geometry['sun_altitude_deg']:.2f}° / {geometry['sun_azimuth_deg']:.2f}°"
+        "Target alt/az": (
+            f"{geometry['target_altitude_deg']:.2f}° / {geometry['target_azimuth_deg']:.2f}°"
         ),
         "Range": f"{geometry['range_km']:.1f} km",
         "Angular speed": f"{geometry['angular_velocity_deg_per_s']:.3f}°/s",

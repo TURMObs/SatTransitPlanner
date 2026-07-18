@@ -1,6 +1,7 @@
 # SatTransitPlanner
 
-Finds satellites that pass in front of the Sun as seen from a fixed observatory.
+Finds satellites that pass in front of the Sun or Moon as seen from a fixed
+observatory.
 
 Positions come from [Skyfield](https://rhodesmill.org/skyfield/) (SGP4 plus a JPL
 ephemeris), orbital elements from [CelesTrak](https://celestrak.org/) as OMM in
@@ -172,6 +173,47 @@ cautionary case: GCAT lists the transfer orbit it launched into, perigee 228 km,
 while the satellite has long since been raised to geostationary — trusting the
 catalogue would put it in a list of low-orbit targets.
 
+## Lunar transits
+
+```bash
+python -m sattransit --target moon --start now --duration 12h
+```
+
+`--target moon` (or `"target": "moon"` in the config) searches the Moon instead
+of the Sun. The search is otherwise identical — same satellites, same geometry,
+same output — but the Moon brings one thing the Sun does not: **light**. Only
+part of its disk is lit, a satellite is a silhouette only against the lit limb,
+and against the dark limb it is visible only if it is itself sunlit rather than
+in Earth's shadow. So each lunar event carries an `illumination` block:
+
+```json
+"illumination": {
+  "phase_deg": 98.0, "illuminated_fraction": 0.44,
+  "bright_limb_angle_deg": 294.0, "limb": "dark", "satellite_sunlit": true
+}
+```
+
+`limb` is which side of the disk the crossing is on; `satellite_sunlit` is false
+when the satellite is eclipsed and so invisible even though it transits. Every
+event is reported and flagged — nothing is dropped silently. To narrow the list,
+the `illumination` config filters exclude conditions you cannot use, for example
+only lit-limb passes of a sunlit satellite:
+
+```json
+"illumination": { "satellite": "sunlit", "limb": "lit" }
+```
+
+These filters are no-ops for the Sun, whose disk is always full and whose
+transiting satellites are always sunlit.
+
+The prediction itself is exact: checked against an independent dense scan, a
+lunar transit's closest approach agrees to about a millisecond, and its limb and
+eclipse flags match a from-scratch recomputation.
+
+> The viewer does not yet draw the Moon's phase — it opens lunar result files and
+> plots them, but with the solar disk's look for now. The grey Moon with its
+> terminator is the next step.
+
 ## Viewing the results
 
 ```bash
@@ -228,8 +270,9 @@ everything else has defaults.
 | `celestrak.groups` | Group names to search. See *Which groups to search*, and the [CelesTrak index](https://celestrak.org/NORAD/elements/) for the full list |
 | `celestrak.max_age_days` | Re-download a group's elements once the cached copy is older than this. CelesTrak publishes new sets every two hours, so values below ~0.08 gain nothing |
 | `celestrak.offline` | Never contact CelesTrak |
-| `search.max_separation_deg` | Report approaches within this angle of the Sun's **center**. `null` means "solar limb", i.e. only true disk transits |
-| `search.min_sun_altitude_deg` | Ignore times when the Sun is lower than this |
+| `target` | The body the satellites transit: `sun` (default) or `moon`. See *Lunar transits* |
+| `search.max_separation_deg` | Report approaches within this angle of the target's **center**. `null` means "the target's limb", i.e. only true disk transits |
+| `search.min_target_altitude_deg` | Ignore times when the target (Sun or Moon) is lower than this |
 | `search.min_satellite_altitude_deg` | Ignore satellites lower than this |
 | `search.coarse_step_seconds` | Step of the first scan (see *How the search works*) |
 | `search.fine_step_seconds` | Step of the second scan |
@@ -238,6 +281,8 @@ everything else has defaults.
 | `search.max_element_age_days` | Skip satellites whose elements are older than this relative to the window |
 | `search.path_samples` | Number of samples in each event's `path` array |
 | `search.satellite_sizes_m` | Overrides for the size catalogue. Key: a NORAD id or a name glob (`STARLINK-*`). Value: one number, or `[min, max]` metres |
+| `illumination.satellite` | Keep events by satellite lighting: `any` (default), `sunlit`, or `eclipsed`. Only bites for the Moon |
+| `illumination.limb` | Keep events by which limb they cross: `any` (default), `lit`, or `dark`. Only bites for the Moon |
 | `sizes.enabled` | Look up physical dimensions at all (default true) |
 | `spacetrack.enabled` | Add the LEO rocket bodies CelesTrak has no group for. Needs an account; see *Rocket bodies from Space-Track* |
 | `spacetrack.max_age_days`, `spacetrack.min_mean_motion` | When to refresh, and the low-orbit cut (11.25 rev/day ≈ a 128 min period) |
@@ -352,20 +397,24 @@ with an HTTP 200 status rather than as error codes:
 
 ## Output
 
-Top level holds `generator`, `observatory`, `observation_window`, `search`,
-`catalog` (including which element files were used and when they were fetched),
-`statistics`, and `events`. Each event carries:
+Top level holds `schema_version` (currently 2), `target` (`sun` or `moon`),
+`generator`, `observatory`, `observation_window`, `search`, `catalog` (including
+which element files were used and when they were fetched), `statistics`, and
+`events`. Each event carries:
 
 - `type` — `disk_transit` if the satellite crosses the disk, otherwise `near_miss`.
-- `closest_approach` — time (UTC and local), separation from the Sun's center in
-  arcsec, the Sun's apparent radius, `chord_offset_fraction` (0 = dead centre,
-  1 = the limb), and the position angle of the satellite east of north.
+- `closest_approach` — time (UTC and local), separation from the target's center
+  in arcsec, the target's apparent radius (`target_radius_arcsec`),
+  `chord_offset_fraction` (0 = dead centre, 1 = the limb), and the position angle
+  of the satellite east of north.
 - `transit` — limb contact times and duration. `null` for a near miss.
-- `geometry` — altitude/azimuth of satellite and Sun, slant range, apparent
+- `geometry` — altitude/azimuth of satellite and target, slant range, apparent
   angular speed and direction of travel.
+- `illumination` — for the Moon, its phase and which limb the crossing is on,
+  and whether the satellite is sunlit. `null` for the Sun. See *Lunar transits*.
 - `size` — the satellite's dimensions and what they subtend at this range, or
   `null` when it is not in the catalogue. See *Satellite sizes*.
-- `path` — samples of the satellite's offset from the Sun's centre
+- `path` — samples of the satellite's offset from the target's centre
   (`dx_arcsec` east, `dy_arcsec` north), spanning the transit. Intended for
   drawing the chord across the disk.
 

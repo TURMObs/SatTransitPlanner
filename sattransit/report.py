@@ -40,12 +40,13 @@ def build_report(
     transits = [e for e in events if e.is_transit]
 
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "generator": {
             "name": "SatTransitPlanner",
             "version": __version__,
             "generated_utc": _iso(datetime.now(timezone.utc)),
         },
+        "target": config.target,
         "observatory": dataclasses.asdict(config.observatory),
         "observation_window": {
             "start_utc": _iso(start),
@@ -57,10 +58,14 @@ def build_report(
         "search": {
             "max_separation_deg": config.search.max_separation_deg,
             "separation_reference": (
-                "solar_limb" if config.search.max_separation_deg is None else "sun_center"
+                "target_limb" if config.search.max_separation_deg is None else "target_center"
             ),
-            "min_sun_altitude_deg": config.search.min_sun_altitude_deg,
+            "min_target_altitude_deg": config.search.min_target_altitude_deg,
             "min_satellite_altitude_deg": config.search.min_satellite_altitude_deg,
+            "illumination": {
+                "satellite": config.illumination.satellite,
+                "limb": config.illumination.limb,
+            },
             "sizes": ("gcat" if config.sizes.enabled else "off"),
             "coarse_step_seconds": config.search.coarse_step_seconds,
             "fine_step_seconds": config.search.fine_step_seconds,
@@ -134,6 +139,20 @@ def _size_to_dict(event: Event) -> dict | None:
     }
 
 
+def _illumination_to_dict(event: Event) -> dict | None:
+    """How a lunar event is lit; ``null`` for the Sun."""
+    lit = event.illumination
+    if lit is None:
+        return None
+    return {
+        "phase_deg": _round(lit.phase_deg, 2),
+        "illuminated_fraction": _round(lit.illuminated_fraction, 4),
+        "bright_limb_angle_deg": _round(lit.bright_limb_angle_deg, 2),
+        "limb": lit.limb,
+        "satellite_sunlit": lit.satellite_sunlit,
+    }
+
+
 def _event_to_dict(event: Event, tz: ZoneInfo, config: Config) -> dict:
     entry = event.entry
     satellite = entry.satellite
@@ -156,8 +175,8 @@ def _event_to_dict(event: Event, tz: ZoneInfo, config: Config) -> dict:
             "time_local": _local(event.closest_time, tz),
             "separation_arcsec": _round(event.separation_deg * 3600.0, 1),
             "separation_deg": _round(event.separation_deg, 6),
-            "sun_radius_arcsec": _round(event.sun_radius_deg * 3600.0, 1),
-            "chord_offset_fraction": _round(event.separation_deg / event.sun_radius_deg, 4),
+            "target_radius_arcsec": _round(event.target_radius_deg * 3600.0, 1),
+            "chord_offset_fraction": _round(event.separation_deg / event.target_radius_deg, 4),
             "position_angle_deg": _round(event.position_angle_deg, 2),
         },
         "transit": (
@@ -174,12 +193,13 @@ def _event_to_dict(event: Event, tz: ZoneInfo, config: Config) -> dict:
         "geometry": {
             "satellite_altitude_deg": _round(event.satellite_altitude_deg, 4),
             "satellite_azimuth_deg": _round(event.satellite_azimuth_deg, 4),
-            "sun_altitude_deg": _round(event.sun_altitude_deg, 4),
-            "sun_azimuth_deg": _round(event.sun_azimuth_deg, 4),
+            "target_altitude_deg": _round(event.target_altitude_deg, 4),
+            "target_azimuth_deg": _round(event.target_azimuth_deg, 4),
             "range_km": _round(event.range_km, 3),
             "angular_velocity_deg_per_s": _round(event.angular_velocity_deg_per_s, 5),
             "motion_position_angle_deg": _round(event.motion_position_angle_deg, 2),
         },
+        "illumination": _illumination_to_dict(event),
         "size": _size_to_dict(event),
     }
 

@@ -96,3 +96,53 @@ def test_fine_step_must_be_smaller_than_coarse(tmp_path):
     data = {**MINIMAL, "search": {"coarse_step_seconds": 10.0, "fine_step_seconds": 20.0}}
     with pytest.raises(ConfigError, match="fine_step_seconds"):
         load_config(write(tmp_path, data))
+
+
+# --- target and illumination (lunar transits) --------------------------------
+
+
+def test_target_defaults_to_sun(tmp_path):
+    assert load_config(write(tmp_path, MINIMAL)).target == "sun"
+
+
+def test_target_can_be_moon(tmp_path):
+    assert load_config(write(tmp_path, {**MINIMAL, "target": "moon"})).target == "moon"
+
+
+def test_an_unknown_target_is_rejected(tmp_path):
+    with pytest.raises(ConfigError, match="target"):
+        load_config(write(tmp_path, {**MINIMAL, "target": "mars"}))
+
+
+def test_illumination_defaults_to_any(tmp_path):
+    c = load_config(write(tmp_path, MINIMAL))
+    assert c.illumination.satellite == "any"
+    assert c.illumination.limb == "any"
+
+
+@pytest.mark.parametrize("value", ["sunlit", "eclipsed", "any"])
+def test_illumination_satellite_values(tmp_path, value):
+    data = {**MINIMAL, "illumination": {"satellite": value}}
+    assert load_config(write(tmp_path, data)).illumination.satellite == value
+
+
+def test_bad_illumination_satellite_is_rejected(tmp_path):
+    data = {**MINIMAL, "illumination": {"satellite": "glowing"}}
+    with pytest.raises(ConfigError, match="illumination.satellite"):
+        load_config(write(tmp_path, data))
+
+
+def test_bad_illumination_limb_is_rejected(tmp_path):
+    data = {**MINIMAL, "illumination": {"limb": "edge"}}
+    with pytest.raises(ConfigError, match="illumination.limb"):
+        load_config(write(tmp_path, data))
+
+
+def test_the_altitude_key_was_renamed_off_the_sun(tmp_path):
+    # min_sun_altitude_deg became min_target_altitude_deg; the old name is now
+    # an unknown option, reported as such.
+    data = {**MINIMAL, "search": {"min_sun_altitude_deg": 5.0}}
+    with pytest.raises(ConfigError, match="unknown option"):
+        load_config(write(tmp_path, data))
+    ok = {**MINIMAL, "search": {"min_target_altitude_deg": 8.0}}
+    assert load_config(write(tmp_path, ok)).search.min_target_altitude_deg == 8.0

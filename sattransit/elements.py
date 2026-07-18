@@ -24,7 +24,7 @@ from skyfield.api import EarthSatellite, Timescale
 from . import __version__
 from .config import CelestrakConfig
 
-USER_AGENT = f"SatTransitPlanner/{__version__} (+satellite solar transit prediction)"
+USER_AGENT = f"SatTransitPlanner/{__version__} (+satellite transit prediction)"
 
 # Fields sgp4's OMM initialiser requires. OBJECT_NAME is optional.
 REQUIRED_FIELDS = frozenset(

@@ -141,9 +141,54 @@ def test_gate_factor_widens_the_net():
     assert len(_brackets(separation, [True] * 5, threshold=1.0, gate_factor=3.0)) == 1
 
 
-def test_sun_radius_matches_known_apparent_size():
-    # At 1 au the Sun's apparent radius is close to 16 arcminutes.
-    radius = TransitFinder.sun_radius_deg(None, 1.0)
-    assert radius * 60.0 == pytest.approx(15.99, abs=0.02)
-    # Aphelion in July gives a slightly smaller disk than perihelion in January.
-    assert TransitFinder.sun_radius_deg(None, 1.017) < radius
+# The apparent-radius formula now lives on Target; see test_target.py.
+
+
+# --- illumination filter (the config include/exclude) ------------------------
+
+from sattransit.target import Illumination  # noqa: E402
+
+
+def _illum(sunlit=True, limb="lit"):
+    return Illumination(
+        phase_deg=90.0, illuminated_fraction=0.5, bright_limb_angle_deg=0.0,
+        limb=limb, satellite_sunlit=sunlit,
+    )
+
+
+def _wanted(satellite, limb, illumination):
+    finder = SimpleNamespace(config=SimpleNamespace(
+        illumination=SimpleNamespace(satellite=satellite, limb=limb)))
+    return TransitFinder._illumination_wanted(finder, illumination)
+
+
+def test_the_sun_has_no_illumination_and_always_passes():
+    # A solar event carries illumination None; no filter can exclude it.
+    assert _wanted("eclipsed", "dark", None) is True
+
+
+def test_any_keeps_everything():
+    assert _wanted("any", "any", _illum(sunlit=False, limb="dark")) is True
+    assert _wanted("any", "any", _illum(sunlit=True, limb="lit")) is True
+
+
+def test_sunlit_filter_excludes_eclipsed_satellites():
+    assert _wanted("sunlit", "any", _illum(sunlit=True)) is True
+    assert _wanted("sunlit", "any", _illum(sunlit=False)) is False
+
+
+def test_eclipsed_filter_excludes_sunlit_satellites():
+    assert _wanted("eclipsed", "any", _illum(sunlit=False)) is True
+    assert _wanted("eclipsed", "any", _illum(sunlit=True)) is False
+
+
+def test_limb_filter_keeps_only_the_named_side():
+    assert _wanted("any", "lit", _illum(limb="lit")) is True
+    assert _wanted("any", "lit", _illum(limb="dark")) is False
+    assert _wanted("any", "dark", _illum(limb="dark")) is True
+
+
+def test_the_filters_combine():
+    assert _wanted("sunlit", "dark", _illum(sunlit=True, limb="dark")) is True
+    assert _wanted("sunlit", "dark", _illum(sunlit=True, limb="lit")) is False
+    assert _wanted("sunlit", "dark", _illum(sunlit=False, limb="dark")) is False
