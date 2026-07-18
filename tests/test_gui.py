@@ -628,3 +628,73 @@ def test_the_disk_view_paints_a_lunar_event(app):
     view.resize(400, 360)
     view.set_event(MOON_TRANSIT)
     assert not view.grab().isNull()
+
+
+# --- Phase B: Moon rendering -------------------------------------------------
+
+from PyQt6.QtGui import QColor  # noqa: E402
+
+
+def _dark_limb_sunlit():
+    return {**MOON_TRANSIT, "illumination": {**MOON_TRANSIT["illumination"],
+                                             "limb": "dark", "satellite_sunlit": True}}
+
+
+def test_the_window_titles_a_lunar_report(app):
+    window = ViewerWindow(THEMES["dark"], apply_theme(app, "dark"), MOON_REPORT, None)
+    assert "Lunar" in window.windowTitle()
+    assert window._disk._target == "moon"
+
+
+def test_a_solar_report_stays_solar(app):
+    window = ViewerWindow(THEMES["dark"], apply_theme(app, "dark"), REPORT, None)
+    assert "Solar" in window.windowTitle()
+    assert window._disk._target == "sun"
+
+
+def test_the_chord_is_a_silhouette_over_the_sun(app):
+    # No illumination: always the dark silhouette colour.
+    view = DiskView(THEMES["dark"])
+    assert view._point_colour(0.0, 100.0, None).name() == QColor(THEMES["dark"]["track"]).name()
+
+
+def test_the_chord_is_bright_over_the_dark_limb_when_sunlit(app):
+    view = DiskView(THEMES["dark"])
+    lit = {"bright_limb_angle_deg": 0.0, "satellite_sunlit": True}
+    # A point opposite the bright limb (PA 180) is over the dark face -> bright.
+    assert view._point_colour(0.0, -100.0, lit).name() == QColor(THEMES["dark"]["sat_bright"]).name()
+    # A point toward the bright limb (PA 0) is over the lit face -> silhouette.
+    assert view._point_colour(0.0, 100.0, lit).name() == QColor(THEMES["dark"]["track"]).name()
+
+
+def test_an_eclipsed_satellite_is_drawn_faint_everywhere(app):
+    view = DiskView(THEMES["dark"])
+    lit = {"bright_limb_angle_deg": 0.0, "satellite_sunlit": False}
+    faint = QColor(THEMES["dark"]["track_outside"]).name()
+    assert view._point_colour(0.0, 100.0, lit).name() == faint   # over lit face
+    assert view._point_colour(0.0, -100.0, lit).name() == faint  # over dark face
+
+
+def test_the_details_show_illumination_for_the_moon():
+    values = _detail_values(_dark_limb_sunlit())
+    assert values["Illuminated"] == "44%"
+    assert values["Crossing limb"] == "dark limb"
+    assert values["Satellite lit"] == "sunlit"
+    assert values["Moon phase"] == "98°"
+
+
+def test_the_illumination_rows_are_blank_for_the_sun():
+    values = _detail_values(TRANSIT)
+    for row in ("Moon phase", "Illuminated", "Crossing limb", "Satellite lit"):
+        assert values[row] is None
+
+
+@pytest.mark.parametrize("fraction", [0.05, 0.5, 0.8, 1.0])
+def test_the_moon_paints_at_every_phase(app, fraction):
+    view = DiskView(THEMES["dark"])
+    view.set_target("moon")
+    view.resize(400, 360)
+    view.set_event({**MOON_TRANSIT,
+                    "illumination": {**MOON_TRANSIT["illumination"],
+                                     "illuminated_fraction": fraction}})
+    assert not view.grab().isNull()

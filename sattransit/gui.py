@@ -87,6 +87,9 @@ THEMES = {
         "plot_bg": "#151413", "sun_core": "#f2c14e", "sun_limb": "#c9902a",
         "sun_rim": "#8a6320", "track": "#171615", "track_outside": "#8c8880",
         "marker_ring": "#e4e0da",
+        # moon disk: lit surface, unlit earthshine, rim, and a sunlit satellite
+        "moon_lit": "#d7d3ca", "moon_dark": "#39372f", "moon_rim": "#8a857b",
+        "sat_bright": "#ffe6a8",
         "macos_dark_titlebar": True,
     },
     "light": {
@@ -107,6 +110,8 @@ THEMES = {
         "plot_bg": "#f7f8fa", "sun_core": "#ffd45c", "sun_limb": "#e3a72c",
         "sun_rim": "#b3821f", "track": "#23262b", "track_outside": "#6b7178",
         "marker_ring": "#23262b",
+        "moon_lit": "#d5d8dd", "moon_dark": "#9aa0a8", "moon_rim": "#6f757d",
+        "sat_bright": "#b5741d",
         "macos_dark_titlebar": False,
     },
 }
@@ -371,21 +376,27 @@ class DetailRow(QFrame):
 
 
 class DiskView(QWidget):
-    """Draws the Sun's disk and the satellite's path across it.
+    """Draws the target's disk and the satellite's path across it.
 
-    Orientation is the usual view of the sky: north up, east left. The chord is
-    drawn dark where it crosses the disk, because that is what an observer sees
-    — the satellite is backlit, a silhouette against the photosphere.
+    Orientation is the usual view of the sky: north up, east left. Over the Sun,
+    or the lit face of the Moon, the satellite is a backlit silhouette and the
+    chord is drawn dark. Over the Moon's dark face it is drawn bright when the
+    satellite is sunlit, and faint when it is eclipsed and so invisible.
     """
 
     def __init__(self, theme: dict):
         super().__init__()
         self._theme = theme
         self._event = None
+        self._target = "sun"
         self.setMinimumSize(320, 280)
 
     def set_event(self, event: dict | None):
         self._event = event
+        self.update()
+
+    def set_target(self, name: str):
+        self._target = name
         self.update()
 
     def _track_points(self, event: dict) -> list[tuple[float, float]]:
@@ -433,10 +444,16 @@ class DiskView(QWidget):
             return QPointF(cx - x * scale, cy - y * scale)
 
         radius_px = disk_radius * scale
-        self._draw_sun(painter, cx, cy, radius_px)
-        self._draw_track(painter, to_screen, points, cx, cy, radius_px)
-        self._draw_marker(painter, to_screen, approach)
-        self._draw_annotations(painter, rect, disk_radius)
+        illumination = self._event.get("illumination")
+        if self._target == "moon" and illumination:
+            self._draw_moon(painter, cx, cy, radius_px, illumination)
+        else:
+            self._draw_sun(painter, cx, cy, radius_px)
+
+        colours = [self._point_colour(x, y, illumination) for x, y in points]
+        self._draw_track(painter, to_screen, points, cx, cy, radius_px, colours)
+        self._draw_marker(painter, to_screen, approach, illumination)
+        self._draw_annotations(painter, rect, disk_radius, illumination)
 
     def _draw_sun(self, painter, cx, cy, radius_px):
         gradient = QRadialGradient(cx, cy, radius_px)
@@ -447,38 +464,96 @@ class DiskView(QWidget):
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawEllipse(QPointF(cx, cy), radius_px, radius_px)
 
-    def _draw_track(self, painter, to_screen, points, cx, cy, radius_px):
+    def _draw_moon(self, painter, cx, cy, radius_px, illumination):
+        """A grey disk with the phase drawn: the lit region bounded by the
+        bright limb on one side and the terminator ellipse on the other.
+        """
+        centre = QPointF(cx, cy)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(self._theme["moon_dark"]))
+        painter.drawEllipse(centre, radius_px, radius_px)
+
+        fraction = illumination["illuminated_fraction"]
+        # Rotate so the bright limb points along +x on screen. A sky direction
+        # (east, north) maps to screen (-east, -north); the bright limb is at
+        # position angle east of north.
+        theta = math.radians(illumination["bright_limb_angle_deg"])
+        screen_angle = math.degrees(math.atan2(-math.cos(theta), -math.sin(theta)))
+
+        painter.save()
+        painter.translate(cx, cy)
+        painter.rotate(screen_angle)
+        # The terminator is a half-ellipse; its x-extent is 0 at quarter phase
+        # and ±R at new/full. b < 0 (gibbous) bulges past centre, b > 0 leaves
+        # a crescent on the bright-limb side.
+        b = radius_px * (1.0 - 2.0 * fraction)
+        steps = 48
+        limb = [
+            QPointF(radius_px * math.cos(a), radius_px * math.sin(a))
+            for a in (math.radians(-90 + 180 * i / steps) for i in range(steps + 1))
+        ]
+        terminator = [
+            QPointF(b * math.cos(a), radius_px * math.sin(a))
+            for a in (math.radians(90 - 180 * i / steps) for i in range(steps + 1))
+        ]
+        painter.setBrush(QColor(self._theme["moon_lit"]))
+        painter.drawPolygon(QPolygonF(limb + terminator))
+        painter.restore()
+
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(QColor(self._theme["moon_rim"]), 1.2))
+        painter.drawEllipse(centre, radius_px, radius_px)
+
+    def _point_colour(self, dx: float, dy: float, illumination: dict | None) -> QColor:
+        """Colour for a chord point inside the disk.
+
+        Over the Sun, or the lit face of the Moon, a dark silhouette. Over the
+        Moon's dark face: bright if the satellite is sunlit, faint if eclipsed.
+        """
+        if illumination is None:  # the Sun: always a silhouette
+            return QColor(self._theme["track"])
+        if not illumination["satellite_sunlit"]:  # eclipsed: invisible
+            return QColor(self._theme["track_outside"])
+        position_angle = math.degrees(math.atan2(dx, dy)) % 360.0
+        delta = abs((position_angle - illumination["bright_limb_angle_deg"] + 180.0) % 360.0 - 180.0)
+        lit_face = delta <= 90.0
+        return QColor(self._theme["track"] if lit_face else self._theme["sat_bright"])
+
+    def _draw_track(self, painter, to_screen, points, cx, cy, radius_px, colours):
         polygon = QPolygonF([to_screen(x, y) for x, y in points])
         clip = QPainterPath()
         clip.addEllipse(QPointF(cx, cy), radius_px, radius_px)
 
-        # Two passes: faint and dashed where the satellite is off the disk and
-        # invisible, a solid silhouette where it crosses the photosphere.
-        # Clipping to the disk saves working out where the chord meets the limb.
-        for inside in (False, True):
-            painter.save()
-            if inside:
-                painter.setClipPath(clip)
-                colour = QColor(self._theme["track"])
-                width, dot, style = 2.2, 3.0, Qt.PenStyle.SolidLine
-            else:
-                colour = QColor(self._theme["track_outside"])
-                width, dot, style = 1.4, 2.2, Qt.PenStyle.DashLine
+        # Off the disk the satellite is not visible: a faint dashed line for the
+        # whole chord, drawn first and overpainted inside the disk.
+        faint = QColor(self._theme["track_outside"])
+        painter.save()
+        painter.setPen(QPen(faint, 1.4, Qt.PenStyle.DashLine))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawPolyline(polygon)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(faint))
+        for point in polygon:
+            painter.drawEllipse(point, 2.2, 2.2)
+        if len(polygon) >= 2:
+            self._draw_arrow(painter, polygon[-2], polygon[-1], faint)
+        painter.restore()
 
-            painter.setPen(QPen(colour, width, style))
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawPolyline(polygon)
-
-            # Samples are equally spaced in time, so their spacing shows the
-            # speed. They must sit proud of the line to be legible.
-            painter.setPen(Qt.PenStyle.NoPen)
+        # Inside the disk, each segment takes the colour of its illumination, so
+        # a chord that crosses the terminator changes from dark to bright. Dots
+        # are equally spaced in time, so their spacing shows the speed.
+        painter.save()
+        painter.setClipPath(clip)
+        for i in range(len(polygon) - 1):
+            painter.setPen(QPen(colours[i], 2.6))
+            painter.drawLine(polygon[i], polygon[i + 1])
+        painter.setPen(Qt.PenStyle.NoPen)
+        for point, colour in zip(polygon, colours):
             painter.setBrush(QBrush(colour))
-            for point in polygon:
-                painter.drawEllipse(point, dot, dot)
-
-            if len(polygon) >= 2:
-                self._draw_arrow(painter, polygon[-2], polygon[-1], colour)
-            painter.restore()
+            painter.drawEllipse(point, 3.0, 3.0)
+        if len(polygon) >= 2:
+            self._draw_arrow(painter, polygon[-2], polygon[-1], colours[-1])
+        painter.restore()
 
     def _draw_arrow(self, painter, start: QPointF, end: QPointF, colour: QColor):
         angle = math.atan2(end.y() - start.y(), end.x() - start.x())
@@ -498,17 +573,22 @@ class DiskView(QWidget):
         painter.setBrush(QBrush(colour))
         painter.drawPolygon(QPolygonF(wings))
 
-    def _draw_marker(self, painter, to_screen, approach):
+    def _draw_marker(self, painter, to_screen, approach, illumination):
         x, y = _offsets(approach["separation_arcsec"], approach["position_angle_deg"])
         centre = to_screen(x, y)
-        painter.setBrush(QBrush(QColor(self._theme["track"])))
+        painter.setBrush(QBrush(self._point_colour(x, y, illumination)))
         painter.setPen(QPen(QColor(self._theme["marker_ring"]), 1.2))
         painter.drawEllipse(centre, 3.4, 3.4)
 
-    def _draw_annotations(self, painter, rect, disk_radius):
+    def _draw_annotations(self, painter, rect, disk_radius, illumination):
         painter.setPen(QColor(self._theme["col_subtle"]))
 
-        painter.drawText(10, 18, f"disk radius {disk_radius:.0f}″  ·  ⌀ {disk_radius / 30:.1f}′")
+        if self._target == "moon" and illumination:
+            lit = illumination["illuminated_fraction"] * 100.0
+            caption = f"lunar radius {disk_radius:.0f}″  ·  {lit:.0f}% lit"
+        else:
+            caption = f"solar radius {disk_radius:.0f}″  ·  ⌀ {disk_radius / 30:.1f}′"
+        painter.drawText(10, 18, caption)
         painter.drawText(10, rect.height() - 8, "dots mark equal time steps")
 
         # Compass, bottom right so it stays clear of the captions.
@@ -794,8 +874,11 @@ class ViewerWindow(QWidget):
         self._report = report
         self._events = list(report.get("events", []))
 
+        target = report.get("target", "sun")
+        self._disk.set_target(target)
         observatory = report.get("observatory", {})
-        self.setWindowTitle(f"Solar Transits — {observatory.get('name', 'Observatory')}")
+        subject = "Lunar Transits" if target == "moon" else "Solar Transits"
+        self.setWindowTitle(f"{subject} — {observatory.get('name', 'Observatory')}")
         self._title.setText(observatory.get("name", "Observatory"))
 
         window = report.get("observation_window", {})
@@ -981,6 +1064,8 @@ _DETAIL_LAYOUT = [
             "Direction of travel",
         ],
     ),
+    # Blank for a solar event, whose disk is always full and satellites sunlit.
+    ("ILLUMINATION", ["Moon phase", "Illuminated", "Crossing limb", "Satellite lit"]),
     ("SIZE", ["Dimensions", "Shape", "Apparent size", "Size source"]),
 ]
 
@@ -993,6 +1078,7 @@ def _detail_values(event: dict) -> dict:
 
     offset = approach.get("chord_offset_fraction")
     size = event.get("size")
+    lit = event.get("illumination")
     values = {
         "Name": satellite["name"],
         "NORAD id": satellite["norad_id"],
@@ -1021,6 +1107,12 @@ def _detail_values(event: dict) -> dict:
         "Range": f"{geometry['range_km']:.1f} km",
         "Angular speed": f"{geometry['angular_velocity_deg_per_s']:.3f}°/s",
         "Direction of travel": f"{geometry['motion_position_angle_deg']:.1f}° (east of north)",
+        "Moon phase": None if lit is None else f"{lit['phase_deg']:.0f}°",
+        "Illuminated": None if lit is None else f"{lit['illuminated_fraction'] * 100:.0f}%",
+        "Crossing limb": None if lit is None else f"{lit['limb']} limb",
+        "Satellite lit": (
+            None if lit is None else ("sunlit" if lit["satellite_sunlit"] else "eclipsed")
+        ),
         # A range, not a figure: the silhouette depends on the satellite's
         # attitude, which the prediction says nothing about.
         "Dimensions": None if size is None else f"{size['min_m']:g} – {size['max_m']:g} m",

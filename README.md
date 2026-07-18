@@ -210,9 +210,17 @@ The prediction itself is exact: checked against an independent dense scan, a
 lunar transit's closest approach agrees to about a millisecond, and its limb and
 eclipse flags match a from-scratch recomputation.
 
-> The viewer does not yet draw the Moon's phase — it opens lunar result files and
-> plots them, but with the solar disk's look for now. The grey Moon with its
-> terminator is the next step.
+The viewer draws the phase, and colours the chord by what the observer would
+actually see:
+
+![A lunar transit: the Moon drawn at 80% lit with its terminator, and the
+satellite's chord bright where it crosses the unlit face and dark where it
+crosses the lit one.](docs/viewer-moon.png)
+
+Above, the satellite is sunlit, so its chord is **bright while it crosses the
+Moon's dark crescent** and turns into a **dark silhouette as it passes onto the
+lit face** — the change happens exactly at the terminator. An eclipsed satellite
+is drawn faint throughout, being invisible wherever it goes.
 
 ## Viewing the results
 
@@ -231,10 +239,11 @@ separation, duration, altitude and range — and draws the selected one on the
 right. Apparent size sits next to the name because it is usually what decides
 whether an event is worth shooting.
 
-The **disk view** shows the Sun with the satellite's chord across it: dark where
-the satellite is a silhouette on the photosphere, faint and dashed where it is
-off the disk. Dots mark equal steps in time, so their spacing shows how fast the
-satellite is moving.
+The **disk view** shows the target with the satellite's chord across it: dark
+where the satellite is a silhouette on the disk, faint and dashed where it is
+off it. Dots mark equal steps in time, so their spacing shows how fast the
+satellite is moving. For the Moon it draws the phase, and the chord follows the
+illumination — see *Lunar transits*.
 
 The **sky view** puts every listed event where it happens in the sky, zenith at
 the centre and horizon at the rim, so the run of dots also traces the Sun's path
