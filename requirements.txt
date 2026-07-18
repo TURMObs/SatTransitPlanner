@@ -6,7 +6,6 @@ numpy>=1.24
 # Only needed for the GUI; the search runs without it.
 PyQt6>=6.6
 
-# --- Optional -----------------------------------------------------------------
-# macOS only: enables the dark window title bar in the GUI. The GUI works
-# without it (it degrades silently), so leave commented unless on macOS.
-# pyobjc-framework-Cocoa>=10.0
+# Nothing else is needed. The macOS window frame is matched to the theme through
+# the Objective-C runtime directly, so PyObjC is not required (it is used if it
+# happens to be installed).

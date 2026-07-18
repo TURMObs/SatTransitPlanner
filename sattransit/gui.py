@@ -185,8 +185,9 @@ def apply_theme(app, name):
     """Apply the named theme to the app; return its stylesheet string."""
     theme = THEMES.get(name, THEMES["dark"])
     app.setPalette(_palette(theme))
-    if theme.get("macos_dark_titlebar"):
-        _force_macos_dark_titlebar()
+    # Set it either way, so the window frame follows the theme rather than the
+    # operating system's own light/dark setting.
+    _set_macos_appearance(bool(theme.get("macos_dark_titlebar")))
 
     # Nothing may be set smaller than the platform's default size, which is what
     # the figures in the details panel use. Reading it back beats hardcoding a
@@ -197,13 +198,73 @@ def apply_theme(app, name):
     return _STYLE_TEMPLATE.substitute(theme, font_pt=base, title_pt=base + 3)
 
 
-def _force_macos_dark_titlebar():
+def _set_macos_appearance(dark: bool) -> None:
+    """Match the macOS window frame to the theme, whatever the OS is set to.
+
+    Qt paints a window's contents but not its frame, so under a light-mode macOS
+    the dark theme otherwise wears a white title bar (and the light theme wears a
+    black one under dark mode). Setting the application's appearance fixes the
+    frame to match.
+
+    PyObjC is tried first, then the bare Objective-C runtime through ctypes.
+    The fallback is what makes this work at all: PyObjC is an optional extra and
+    is usually absent, so the import alone silently did nothing. Both paths need
+    AppKit loaded, which the Qt application has already done by the time a theme
+    is applied; messaging a class that is somehow missing is a no-op in
+    Objective-C rather than a crash.
+    """
     if sys.platform != "darwin":
         return
-    try:
+    name = "NSAppearanceNameDarkAqua" if dark else "NSAppearanceNameAqua"
+
+    try:  # PyObjC, when it happens to be installed
         from AppKit import NSApp, NSAppearance  # type: ignore
 
-        NSApp.setAppearance_(NSAppearance.appearanceNamed_("NSAppearanceNameDarkAqua"))
+        NSApp.setAppearance_(NSAppearance.appearanceNamed_(name))
+        return
+    except Exception:
+        pass
+
+    try:  # the Objective-C runtime directly, needing nothing extra
+        import ctypes
+        import ctypes.util
+
+        objc = ctypes.cdll.LoadLibrary(ctypes.util.find_library("objc"))
+        objc.objc_getClass.restype = ctypes.c_void_p
+        objc.objc_getClass.argtypes = [ctypes.c_char_p]
+        objc.sel_registerName.restype = ctypes.c_void_p
+        objc.sel_registerName.argtypes = [ctypes.c_char_p]
+        objc.objc_msgSend.restype = ctypes.c_void_p
+
+        def send(receiver, selector, *args, string=None):
+            # objc_msgSend is variadic, so its prototype has to be declared for
+            # each distinct call or the arguments arrive wrong on arm64.
+            if string is not None:
+                objc.objc_msgSend.argtypes = [
+                    ctypes.c_void_p,
+                    ctypes.c_void_p,
+                    ctypes.c_char_p,
+                ]
+                return objc.objc_msgSend(receiver, selector, string)
+            objc.objc_msgSend.argtypes = [ctypes.c_void_p, ctypes.c_void_p] + [
+                ctypes.c_void_p
+            ] * len(args)
+            return objc.objc_msgSend(receiver, selector, *args)
+
+        def cls(name):
+            return objc.objc_getClass(name.encode())
+
+        def sel(name):
+            return objc.sel_registerName(name.encode())
+
+        ns_name = send(
+            cls("NSString"),
+            sel("stringWithUTF8String:"),
+            string=name.encode(),
+        )
+        appearance = send(cls("NSAppearance"), sel("appearanceNamed:"), ns_name)
+        application = send(cls("NSApplication"), sel("sharedApplication"))
+        send(application, sel("setAppearance:"), appearance)
     except Exception:
         pass
 

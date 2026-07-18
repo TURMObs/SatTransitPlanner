@@ -2,6 +2,7 @@
 
 import json
 import os
+import sys
 
 import pytest
 
@@ -698,3 +699,33 @@ def test_the_moon_paints_at_every_phase(app, fraction):
                     "illumination": {**MOON_TRANSIT["illumination"],
                                      "illuminated_fraction": fraction}})
     assert not view.grab().isNull()
+
+
+# --- the macOS title bar -----------------------------------------------------
+
+from sattransit.gui import _set_macos_appearance  # noqa: E402
+
+
+def test_setting_the_appearance_is_a_no_op_off_macos(monkeypatch):
+    # Nothing to do, and nothing to import, on Linux or Windows.
+    monkeypatch.setattr(sys, "platform", "linux")
+    called = []
+    monkeypatch.setattr("ctypes.util.find_library", lambda name: called.append(name))
+    _set_macos_appearance(True)
+    _set_macos_appearance(False)
+    assert called == []
+
+
+def test_setting_the_appearance_never_raises(monkeypatch):
+    # It runs for its side effect only; a missing runtime must not take the
+    # viewer down with it.
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr("ctypes.util.find_library", lambda name: "/no/such/library")
+    _set_macos_appearance(True)  # must not raise
+
+
+def test_both_themes_declare_a_titlebar_appearance():
+    # apply_theme reads this to decide which appearance to set, so it has to be
+    # present in every theme, not just the dark one.
+    assert THEMES["dark"]["macos_dark_titlebar"] is True
+    assert THEMES["light"]["macos_dark_titlebar"] is False
