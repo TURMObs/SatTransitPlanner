@@ -199,6 +199,12 @@ class TimelineView(QWidget):
         self._now = now
         self.update()
 
+    @staticmethod
+    def _band_label(moments: Moments) -> str:
+        """What the band is. It spans ingress to egress, so it is the whole
+        transit rather than the instant it begins; a near miss is one moment."""
+        return "transit" if moments.is_transit else "closest"
+
     def paintEvent(self, _event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -267,7 +273,7 @@ class TimelineView(QWidget):
             int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter),
             "+" + _span_label(span),
         )
-        label = "ingress" if moments.is_transit else "closest"
+        label = self._band_label(moments)
         painter.drawText(
             QRectF((left + right) / 2 - 50, axis_y - 38, 100, 16),
             int(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter),

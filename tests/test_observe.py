@@ -306,3 +306,10 @@ def test_the_window_honours_a_configured_lead(app):
     # Mid is 14:43:55.699 UTC, so a 30 s lead starts recording at 14:43:25.
     assert "14:43:25" in _labels(window)
     window.close()
+
+
+def test_the_timeline_band_is_labelled_for_what_it_spans(app):
+    # The band runs ingress to egress, so it is the transit, not its start.
+    view = TimelineView(THEMES["dark"])
+    assert view._band_label(moments_of(TRANSIT)) == "transit"
+    assert view._band_label(moments_of(NEAR_MISS)) == "closest"
