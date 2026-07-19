@@ -18,6 +18,7 @@ from sattransit.observe import (  # noqa: E402
     countdown_text,
     moments_of,
     phase_at,
+    recording_start,
     timeline_span_seconds,
     urgency,
 )
@@ -207,3 +208,91 @@ def test_closing_stops_the_clock(app):
     assert window._timer.isActive()
     window.close()
     assert not window._timer.isActive()
+
+
+# --- when to start recording -------------------------------------------------
+
+
+def test_recording_starts_a_lead_before_mid_on_a_whole_second():
+    mid = datetime(2026, 7, 24, 20, 3, 15, 900000, tzinfo=timezone.utc)
+    assert recording_start(mid) == datetime(2026, 7, 24, 20, 3, 10, tzinfo=timezone.utc)
+
+
+def test_the_recording_lead_is_never_shortened_by_rounding():
+    # Rounding down means you always get at least the full lead, never less.
+    for micro in (0, 1, 200000, 500000, 999999):
+        mid = datetime(2026, 7, 24, 20, 3, 15, micro, tzinfo=timezone.utc)
+        lead = (mid - recording_start(mid)).total_seconds()
+        assert 5.0 <= lead < 6.0
+
+
+def test_recording_start_crosses_a_minute_boundary():
+    mid = datetime(2026, 7, 24, 20, 3, 4, 200000, tzinfo=timezone.utc)
+    assert recording_start(mid) == datetime(2026, 7, 24, 20, 2, 59, tzinfo=timezone.utc)
+
+
+def test_the_recording_lead_is_configurable():
+    mid = datetime(2026, 7, 24, 20, 3, 15, 0, tzinfo=timezone.utc)
+    assert recording_start(mid, lead_seconds=30).second == 45
+    assert recording_start(mid, lead_seconds=30).minute == 2
+
+
+# --- the countdown font ------------------------------------------------------
+
+
+def test_the_countdown_font_is_fixed_pitch(app):
+    # Otherwise the digits jitter as they tick. macOS's nominal fixed font is
+    # not actually monospaced, so the family list matters.
+    from PyQt6.QtGui import QFontInfo, QFontMetrics
+
+    from sattransit.observe import countdown_font
+
+    font = countdown_font(39)
+    assert QFontInfo(font).fixedPitch()
+    metrics = QFontMetrics(font)
+    widths = {metrics.horizontalAdvance(t) for t in
+              ("T− 00:52.0", "T− 00:11.1", "T− 04:04.0", "T+ 00:08.8")}
+    assert len(widths) == 1, "same-length countdowns must render the same width"
+
+
+# --- local and UTC -----------------------------------------------------------
+
+
+def _labels(window):
+    from PyQt6.QtWidgets import QLabel
+
+    return [w.text() for w in window.findChildren(QLabel)]
+
+
+def test_the_window_shows_both_local_and_utc(app):
+    window = ObservingWindow(
+        THEMES["dark"], apply_theme(app, "dark"), TRANSIT, now_provider=lambda: INGRESS
+    )
+    labels = _labels(window)
+    assert "local" in labels and "UTC" in labels
+    # AQUA's transit: 16:43:55.1 local (+02:00) is 14:43:55.1 UTC.
+    assert "16:43:55.1" in labels and "14:43:55.1" in labels
+    window.close()
+
+
+def test_the_window_offers_a_recording_time(app):
+    window = ObservingWindow(
+        THEMES["dark"], apply_theme(app, "dark"), TRANSIT, now_provider=lambda: INGRESS
+    )
+    labels = _labels(window)
+    assert "Start recording" in labels
+    # Mid is 14:43:55.699 UTC, so recording starts at 14:43:50 on the second.
+    assert "14:43:50" in labels
+    assert "16:43:50" in labels  # and the local equivalent
+    window.close()
+
+
+def test_a_near_miss_also_gets_a_recording_time(app):
+    window = ObservingWindow(
+        THEMES["dark"], apply_theme(app, "dark"), NEAR_MISS, now_provider=lambda: CLOSEST
+    )
+    labels = _labels(window)
+    assert "Start recording" in labels
+    assert "Closest" in labels
+    assert "Ingress" not in labels  # it never touches the disk
+    window.close()

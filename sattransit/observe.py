@@ -15,15 +15,26 @@ if the machine's clock is a second out, so keep it synchronised.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer
-from PyQt6.QtGui import QBrush, QColor, QFont, QPainter, QPen, QPolygonF
-from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PyQt6.QtGui import (
+    QBrush,
+    QColor,
+    QFont,
+    QPainter,
+    QPen,
+    QPolygonF,
+)
+from PyQt6.QtWidgets import QFrame, QGridLayout, QLabel, QVBoxLayout, QWidget
 
 # The countdown ticks at this rate: fast enough to show tenths smoothly,
 # far too slow to matter for the CPU.
 TICK_MS = 100
+
+# How long before mid-transit to start recording. Enough to have the camera
+# rolling and settled before anything crosses.
+RECORDING_LEAD_SECONDS = 5.0
 
 
 def _parse(stamp: str | None) -> datetime | None:
@@ -107,6 +118,43 @@ def timeline_span_seconds(remaining: float, duration: float) -> float:
     just a few multiples of the transit's own length.
     """
     return max(2.0 * duration, min(600.0, max(5.0, abs(remaining) * 1.4)))
+
+
+def countdown_font(point_size: int) -> QFont:
+    """A fixed-pitch font, so a ticking countdown does not jitter.
+
+    Every digit has to occupy the same width or the ones beside a changing
+    digit shift about. macOS's nominal "fixed font" is not actually one — it
+    resolves to American Typewriter, whose ``1`` is narrow — so the family is
+    named explicitly, most-preferred first. Qt falls back through the list and,
+    guided by the style hint, lands on a real monospace face on any platform.
+    """
+    font = QFont()
+    font.setFamilies(
+        [
+            "Menlo",  # macOS
+            "SF Mono",
+            "Consolas",  # Windows
+            "DejaVu Sans Mono",  # Linux
+            "Liberation Mono",
+            "Courier New",  # near-universal last resort
+            "monospace",
+        ]
+    )
+    font.setStyleHint(QFont.StyleHint.Monospace)
+    font.setFixedPitch(True)
+    font.setPointSize(point_size)
+    font.setBold(True)
+    return font
+
+
+def recording_start(mid: datetime, lead_seconds: float = RECORDING_LEAD_SECONDS) -> datetime:
+    """When to hit record: a lead before mid-transit, on a whole second.
+
+    Rounded down so the moment is a round number that can be read off a clock
+    and acted on, and so the lead is never shortened by the rounding.
+    """
+    return (mid - timedelta(seconds=lead_seconds)).replace(microsecond=0)
 
 
 def urgency(phase: str, remaining: float) -> str:
@@ -262,7 +310,6 @@ class ObservingWindow(QWidget):
 
     def _build_ui(self, event: dict, target: str):
         satellite = event.get("satellite", {})
-        approach = event.get("closest_approach", {})
         geometry = event.get("geometry", {})
         size = event.get("size")
         lit = event.get("illumination")
@@ -289,12 +336,10 @@ class ObservingWindow(QWidget):
         root.addWidget(subtitle)
 
         # The countdown, as large as the window allows: it has to be readable
-        # from arm's length in the dark.
+        # from arm's length in the dark. Fixed pitch, or every digit that
+        # changes shifts the ones beside it and the whole number jitters.
         self._countdown = QLabel("—")
-        countdown_font = QFont()
-        countdown_font.setPointSize(max(self.font().pointSize(), 9) * 3)
-        countdown_font.setBold(True)
-        self._countdown.setFont(countdown_font)
+        self._countdown.setFont(countdown_font(max(self.font().pointSize(), 9) * 3))
         self._countdown.setAlignment(Qt.AlignmentFlag.AlignCenter)
         root.addWidget(self._countdown)
 
@@ -311,32 +356,89 @@ class ObservingWindow(QWidget):
         line.setFrameShape(QFrame.Shape.HLine)
         root.addWidget(line)
 
-        rows = QVBoxLayout()
-        rows.setSpacing(2)
-        transit = event.get("transit")
-        entries = []
-        if transit:
-            entries.append(("Ingress", _clock(transit.get("start_local"))))
-            entries.append(("Mid", _clock(approach.get("time_local"))))
-            entries.append(("Egress", _clock(transit.get("end_local"))))
-            entries.append(("Duration", f"{transit['duration_seconds']:.3f} s"))
-        else:
-            entries.append(("Closest", _clock(approach.get("time_local"))))
-            entries.append(("Separation", f"{approach.get('separation_arcsec', 0):.0f}″"))
-        entries.append(("Elements", f"{satellite.get('element_age_days', 0):.1f} d old"))
-        for name, value in entries:
-            row = QHBoxLayout()
-            left = QLabel(name)
-            left.setObjectName("sname")
-            right = QLabel(value)
-            right.setObjectName("sval")
-            right.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-            row.addWidget(left)
-            row.addStretch(1)
-            row.addWidget(right)
-            rows.addLayout(row)
-        root.addLayout(rows)
+        root.addLayout(self._build_times(event))
         root.addStretch(1)
+
+    def _build_times(self, event: dict):
+        """The times, local and UTC side by side, in the order they happen."""
+        approach = event.get("closest_approach", {})
+        transit = event.get("transit")
+        satellite = event.get("satellite", {})
+        moments = self._moments
+
+        # The observatory's own zone, taken from the report's local stamp, so
+        # the two columns can never disagree about the same instant.
+        local_stamp = _parse(approach.get("time_local"))
+        zone = local_stamp.tzinfo if local_stamp else timezone.utc
+
+        def pair(moment: datetime | None, tenths: bool = True):
+            if moment is None:
+                return "—", "—"
+            return _clock(moment.astimezone(zone), tenths), _clock(
+                moment.astimezone(timezone.utc), tenths
+            )
+
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(14)
+        grid.setVerticalSpacing(2)
+        grid.setColumnStretch(1, 1)
+
+        header_local = QLabel("local")
+        header_local.setObjectName("sname")
+        header_local.setAlignment(Qt.AlignmentFlag.AlignRight)
+        header_utc = QLabel("UTC")
+        header_utc.setObjectName("sname")
+        header_utc.setAlignment(Qt.AlignmentFlag.AlignRight)
+        grid.addWidget(header_local, 0, 1)
+        grid.addWidget(header_utc, 0, 2)
+
+        entries = []
+        if moments is not None:
+            # Chronological: recording starts before anything else happens.
+            entries.append(
+                ("Start recording", *pair(recording_start(moments.closest), tenths=False), True)
+            )
+        if transit and moments is not None:
+            entries.append(("Ingress", *pair(moments.ingress), False))
+            entries.append(("Mid", *pair(moments.closest), False))
+            entries.append(("Egress", *pair(moments.egress), False))
+        elif moments is not None:
+            entries.append(("Closest", *pair(moments.closest), False))
+
+        for row, (name, local, utc, accent) in enumerate(entries, start=1):
+            label = QLabel(name)
+            label.setObjectName("sval" if accent else "sname")
+            if accent:
+                label.setStyleSheet(f"color: {self._theme['col_accent']}; font-weight: bold;")
+            grid.addWidget(label, row, 0)
+            for column, text in ((1, local), (2, utc)):
+                value = QLabel(text)
+                value.setObjectName("sval")
+                value.setAlignment(Qt.AlignmentFlag.AlignRight)
+                value.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+                if accent:
+                    value.setStyleSheet(
+                        f"color: {self._theme['col_accent']}; font-weight: bold;"
+                    )
+                grid.addWidget(value, row, column)
+
+        # Figures that are not times sit underneath, spanning both columns.
+        extras = []
+        if transit:
+            extras.append(("Duration", f"{transit['duration_seconds']:.3f} s"))
+        else:
+            extras.append(("Separation", f"{approach.get('separation_arcsec', 0):.0f}″"))
+        extras.append(("Elements", f"{satellite.get('element_age_days', 0):.1f} d old"))
+        for offset, (name, text) in enumerate(extras):
+            row = len(entries) + 1 + offset
+            label = QLabel(name)
+            label.setObjectName("sname")
+            value = QLabel(text)
+            value.setObjectName("sval")
+            value.setAlignment(Qt.AlignmentFlag.AlignRight)
+            grid.addWidget(label, row, 0)
+            grid.addWidget(value, row, 1, 1, 2)
+        return grid
 
     # --- ticking -------------------------------------------------------------
 
@@ -372,11 +474,10 @@ class ObservingWindow(QWidget):
         super().closeEvent(event)
 
 
-def _clock(local: str | None) -> str:
-    """The local timestamp, to a tenth of a second."""
-    if not local:
-        return "—"
-    moment = _parse(local)
+def _clock(moment: datetime | None, tenths: bool = True) -> str:
+    """A wall-clock time, to a tenth of a second unless asked otherwise."""
     if moment is None:
-        return local
+        return "—"
+    if not tenths:
+        return moment.strftime("%H:%M:%S")
     return moment.strftime("%H:%M:%S.") + f"{moment.microsecond // 100000:d}"

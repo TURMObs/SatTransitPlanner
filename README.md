@@ -270,8 +270,8 @@ separate countdown window to keep in view while you shoot. Several can be open
 at once, which is what back-to-back passes need.
 
 ![The observing window: a large countdown to ingress, a timeline that zooms in
-as the moment approaches, and the ingress, mid, egress and duration
-times.](docs/observing-window.png)
+as the moment approaches, and the recording, ingress, mid and egress times in
+both local time and UTC.](docs/observing-window.png)
 
 A transit lasts well under a second, so what matters is the approach to it. The
 countdown is the main display and escalates as it runs down — plain, then amber
@@ -280,6 +280,15 @@ actually crossing, when it reads `TRANSIT` and counts the fractions elapsed.
 The timeline underneath zooms with it, from a ten-minute view down to a few
 seconds, so the marker is always visibly moving instead of frozen at a scale
 where nothing happens.
+
+**Start recording** is the actionable line, highlighted and listed first because
+it comes first: five seconds before mid-transit, rounded down to a whole second
+so it is a round number you can act on, and so the lead is never shortened by
+the rounding. Every time is given in both local time and UTC.
+
+The countdown is set in a fixed-pitch face. That is not decoration: in a
+proportional font each digit that ticks over shifts the ones beside it, and a
+number you are watching for a cue jitters.
 
 Near misses never touch the disk, so they have no ingress: those count down to
 the closest approach instead, and say so.
