@@ -58,6 +58,7 @@ except ImportError:
 
 from . import __version__
 from .config import DEFAULT_CONFIG_FILE, ConfigError, load_config
+from .observe import RECORDING_LEAD_SECONDS
 
 # --- Themes ------------------------------------------------------------------
 #
@@ -771,9 +772,17 @@ def _apparent_size(event: dict) -> float | None:
 
 class ViewerWindow(QWidget):
 
-    def __init__(self, theme: dict, stylesheet: str = "", report: dict | None = None, path=None):
+    def __init__(
+        self,
+        theme: dict,
+        stylesheet: str = "",
+        report: dict | None = None,
+        path=None,
+        recording_lead_seconds: float = RECORDING_LEAD_SECONDS,
+    ):
         super().__init__()
         self._theme = theme
+        self._recording_lead_seconds = recording_lead_seconds
         self._report = None
         self._events: list[dict] = []
         self._detail_rows: dict[str, DetailRow] = {}
@@ -1126,6 +1135,7 @@ class ViewerWindow(QWidget):
             self.styleSheet(),
             event,
             target=(self._report or {}).get("target", "sun"),
+            lead_seconds=self._recording_lead_seconds,
         )
         # Several can be open at once, for back-to-back passes. Without a
         # reference they would be collected the moment this returns.
@@ -1250,6 +1260,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
     theme_name = args.theme or "dark"
+    lead = RECORDING_LEAD_SECONDS
     results = Path(args.results) if args.results else None
 
     # A named configuration file must exist; the default is only a convenience,
@@ -1263,6 +1274,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         if args.theme is None:
             theme_name = config.gui.theme
+        lead = config.gui.recording_lead_seconds
         if results is None:
             results = config.resolve_output(None)
 
@@ -1280,7 +1292,9 @@ def main(argv: list[str] | None = None) -> int:
     app.setStyle("Fusion")
     stylesheet = apply_theme(app, theme_name)
 
-    window = ViewerWindow(THEMES[theme_name], stylesheet, report, results)
+    window = ViewerWindow(
+        THEMES[theme_name], stylesheet, report, results, recording_lead_seconds=lead
+    )
     window.show()
     return app.exec()
 

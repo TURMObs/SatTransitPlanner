@@ -282,9 +282,11 @@ seconds, so the marker is always visibly moving instead of frozen at a scale
 where nothing happens.
 
 **Start recording** is the actionable line, highlighted and listed first because
-it comes first: five seconds before mid-transit, rounded down to a whole second
-so it is a round number you can act on, and so the lead is never shortened by
-the rounding. Every time is given in both local time and UTC.
+it comes first: a set lead before mid-transit, rounded down to a whole second so
+it is a round number you can act on, and so the lead is never shortened by the
+rounding — only stretched, by up to a second. The lead is
+`gui.recording_lead_seconds`, five seconds by default; hovering the label shows
+what it is currently set to. Every time is given in both local time and UTC.
 
 The countdown is set in a fixed-pitch face. That is not decoration: in a
 proportional font each digit that ticks over shifts the ones beside it, and a
@@ -334,6 +336,7 @@ everything else has defaults.
 | `favorites.file` | List used by `--favorites` when no file is given |
 | `output.file`, `output.indent`, `output.include_path` | Output file, JSON indentation, whether to emit `path` |
 | `gui.theme` | Viewer theme: `dark` (default) or `light` |
+| `gui.recording_lead_seconds` | How far before mid-transit the observing window says to start recording (default 5) |
 
 A satellite listed in several groups is searched once and reports all of its
 groups. When groups disagree about a satellite's elements, the set with the

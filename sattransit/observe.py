@@ -286,11 +286,12 @@ class ObservingWindow(QWidget):
     """Live countdown and timeline for one event."""
 
     def __init__(self, theme: dict, stylesheet: str, event: dict, target: str = "sun",
-                 now_provider=None):
+                 now_provider=None, lead_seconds: float = RECORDING_LEAD_SECONDS):
         super().__init__()
         self._theme = theme
         self._event = event
         self._moments = moments_of(event)
+        self._lead_seconds = lead_seconds
         # Injectable so the display can be tested, and screenshotted, at any
         # moment relative to the event.
         self._now_provider = now_provider or (lambda: datetime.now(timezone.utc))
@@ -396,7 +397,11 @@ class ObservingWindow(QWidget):
         if moments is not None:
             # Chronological: recording starts before anything else happens.
             entries.append(
-                ("Start recording", *pair(recording_start(moments.closest), tenths=False), True)
+                (
+                    "Start recording",
+                    *pair(recording_start(moments.closest, self._lead_seconds), tenths=False),
+                    True,
+                )
             )
         if transit and moments is not None:
             entries.append(("Ingress", *pair(moments.ingress), False))
@@ -410,6 +415,10 @@ class ObservingWindow(QWidget):
             label.setObjectName("sval" if accent else "sname")
             if accent:
                 label.setStyleSheet(f"color: {self._theme['col_accent']}; font-weight: bold;")
+                label.setToolTip(
+                    f"{self._lead_seconds:g} s before mid-transit, rounded down to a "
+                    "whole second (gui.recording_lead_seconds)"
+                )
             grid.addWidget(label, row, 0)
             for column, text in ((1, local), (2, utc)):
                 value = QLabel(text)

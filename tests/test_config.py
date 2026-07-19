@@ -146,3 +146,19 @@ def test_the_altitude_key_was_renamed_off_the_sun(tmp_path):
         load_config(write(tmp_path, data))
     ok = {**MINIMAL, "search": {"min_target_altitude_deg": 8.0}}
     assert load_config(write(tmp_path, ok)).search.min_target_altitude_deg == 8.0
+
+
+def test_recording_lead_defaults_to_five_seconds(tmp_path):
+    assert load_config(write(tmp_path, MINIMAL)).gui.recording_lead_seconds == 5.0
+
+
+def test_recording_lead_can_be_changed(tmp_path):
+    data = {**MINIMAL, "gui": {"recording_lead_seconds": 30}}
+    assert load_config(write(tmp_path, data)).gui.recording_lead_seconds == 30
+
+
+@pytest.mark.parametrize("bad", [0, -5])
+def test_a_non_positive_recording_lead_is_rejected(tmp_path, bad):
+    data = {**MINIMAL, "gui": {"recording_lead_seconds": bad}}
+    with pytest.raises(ConfigError, match="recording_lead_seconds"):
+        load_config(write(tmp_path, data))

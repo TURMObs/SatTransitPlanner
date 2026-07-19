@@ -296,3 +296,13 @@ def test_a_near_miss_also_gets_a_recording_time(app):
     assert "Closest" in labels
     assert "Ingress" not in labels  # it never touches the disk
     window.close()
+
+
+def test_the_window_honours_a_configured_lead(app):
+    window = ObservingWindow(
+        THEMES["dark"], apply_theme(app, "dark"), TRANSIT,
+        now_provider=lambda: INGRESS, lead_seconds=30.0,
+    )
+    # Mid is 14:43:55.699 UTC, so a 30 s lead starts recording at 14:43:25.
+    assert "14:43:25" in _labels(window)
+    window.close()

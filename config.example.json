@@ -63,6 +63,7 @@
   },
 
   "gui": {
-    "theme": "dark"
+    "theme": "dark",
+    "recording_lead_seconds": 5.0
   }
 }

@@ -117,6 +117,8 @@ class FavoritesConfig:
 @dataclass
 class GuiConfig:
     theme: str = "dark"
+    # How long before mid-transit the observing window says to start recording.
+    recording_lead_seconds: float = 5.0
 
 
 @dataclass
@@ -291,3 +293,5 @@ def _validate(config: Config) -> None:
 
     if config.gui.theme not in ("dark", "light"):
         raise ConfigError(f"gui.theme: must be 'dark' or 'light', not {config.gui.theme!r}")
+    if config.gui.recording_lead_seconds <= 0:
+        raise ConfigError("gui.recording_lead_seconds: must be positive")

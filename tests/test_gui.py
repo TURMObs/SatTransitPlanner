@@ -767,3 +767,17 @@ def test_observing_does_nothing_without_a_selection(app):
     window = ViewerWindow(THEMES["dark"], apply_theme(app, "dark"), {**REPORT, "events": []}, None)
     window._on_observe()  # must not raise
     assert getattr(window, "_observing", []) == []
+
+
+def test_the_configured_recording_lead_reaches_the_observing_window(app):
+    from PyQt6.QtWidgets import QLabel
+
+    window = ViewerWindow(
+        THEMES["dark"], apply_theme(app, "dark"), REPORT, None, recording_lead_seconds=30.0
+    )
+    window._table.selectRow(0)
+    window._on_observe()
+    opened = window._observing[0]
+    assert opened._lead_seconds == 30.0
+    assert "14:43:25" in [w.text() for w in opened.findChildren(QLabel)]
+    opened.close()
