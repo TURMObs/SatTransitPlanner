@@ -17,7 +17,8 @@ dist/
 # config.old.json, which a rule naming config.json alone would let through.
 config*.json
 !config.example.json
-transits.json
+# Results, whatever they are named: transits.json, transits_moon_2026-07-19.json…
+transits*.json
 
 # Downloaded orbital elements (OMM JSON), size catalogue and ephemerides.
 # Space-Track's user agreement restricts passing its data on, so this must not

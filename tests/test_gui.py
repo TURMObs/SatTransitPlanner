@@ -729,3 +729,41 @@ def test_both_themes_declare_a_titlebar_appearance():
     # present in every theme, not just the dark one.
     assert THEMES["dark"]["macos_dark_titlebar"] is True
     assert THEMES["light"]["macos_dark_titlebar"] is False
+
+
+# --- opening the observing window --------------------------------------------
+
+
+def test_the_observe_button_is_off_until_something_is_selected(app):
+    window = ViewerWindow(THEMES["dark"], apply_theme(app, "dark"), {**REPORT, "events": []}, None)
+    assert not window._observe_btn.isEnabled()
+    window2 = ViewerWindow(THEMES["dark"], apply_theme(app, "dark"), REPORT, None)
+    assert window2._observe_btn.isEnabled()  # a row is selected on load
+
+
+def test_observing_opens_a_window_for_the_selected_event(app):
+    window = ViewerWindow(THEMES["dark"], apply_theme(app, "dark"), REPORT, None)
+    window._table.selectRow(0)
+    window._on_observe()
+    assert len(window._observing) == 1
+    opened = window._observing[0]
+    assert opened._event["satellite"]["name"] == window._table.item(0, 1).text()
+    opened.close()
+
+
+def test_several_observing_windows_can_be_open_at_once(app):
+    # Back-to-back passes are common, so one window must not replace another.
+    window = ViewerWindow(THEMES["dark"], apply_theme(app, "dark"), REPORT, None)
+    window._table.selectRow(0)
+    window._on_observe()
+    window._table.selectRow(1)
+    window._on_observe()
+    assert len(window._observing) == 2
+    for opened in window._observing:
+        opened.close()
+
+
+def test_observing_does_nothing_without_a_selection(app):
+    window = ViewerWindow(THEMES["dark"], apply_theme(app, "dark"), {**REPORT, "events": []}, None)
+    window._on_observe()  # must not raise
+    assert getattr(window, "_observing", []) == []

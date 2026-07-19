@@ -801,6 +801,14 @@ class ViewerWindow(QWidget):
         self._title.setObjectName("title")
         header.addWidget(self._title)
         header.addStretch(1)
+        self._observe_btn = QPushButton("Observe…")
+        self._observe_btn.setObjectName("expert")
+        self._observe_btn.setToolTip(
+            "Open a countdown window for the selected event (or double-click its row)"
+        )
+        self._observe_btn.clicked.connect(self._on_observe)
+        self._observe_btn.setEnabled(False)
+        header.addWidget(self._observe_btn)
         open_btn = QPushButton("Open…")
         open_btn.setObjectName("expert")
         open_btn.setToolTip("Open a results file written by python -m sattransit")
@@ -874,6 +882,7 @@ class ViewerWindow(QWidget):
         self._table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self._table.setShowGrid(False)
         self._table.itemSelectionChanged.connect(self._on_selection)
+        self._table.itemDoubleClicked.connect(lambda _item: self._on_observe())
 
         head = self._table.horizontalHeader()
         # Not ResizeToContents: that re-measures every row on each cell change,
@@ -1090,11 +1099,40 @@ class ViewerWindow(QWidget):
     def _show_event(self, event: dict | None):
         self._disk.set_event(event)
         self._sky.set_selected(event)
+        self._observe_btn.setEnabled(event is not None)
         values = _detail_values(event) if event else {}
         for name, row in self._detail_rows.items():
             row.set_value(values.get(name))
 
     # --- actions -------------------------------------------------------------
+
+    def _on_observe(self):
+        """Open a countdown window for the selected event.
+
+        Imported here rather than at the top so the two modules do not have to
+        import each other, and because nothing is needed until it is asked for.
+        """
+        row = self._table.currentRow()
+        if row < 0 or self._table.isRowHidden(row):
+            return
+        event = self._event_at(row)
+        if event is None:
+            return
+
+        from .observe import ObservingWindow
+
+        window = ObservingWindow(
+            self._theme,
+            self.styleSheet(),
+            event,
+            target=(self._report or {}).get("target", "sun"),
+        )
+        # Several can be open at once, for back-to-back passes. Without a
+        # reference they would be collected the moment this returns.
+        self._observing = [w for w in getattr(self, "_observing", []) if w.isVisible()]
+        self._observing.append(window)
+        window.show()
+        window.raise_()
 
     def _on_open(self):
         start_dir = str(Path.cwd())

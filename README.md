@@ -20,6 +20,7 @@ sattransit/        the package
   sizes.py         GCAT physical dimensions + caching
   cli.py           the search frontend
   gui.py           the viewer frontend
+  observe.py       the countdown window for use at the telescope
   config.py report.py timeutil.py
 transit_gui.py     wrapper -> viewer, without -m
 config.example.json  template for your site configuration
@@ -261,6 +262,31 @@ pointing at. A limit reading `any` is not filtering anything, the `−` and `+`
 buttons step it (hold to repeat), and `Reset` clears them all. The top line
 reports how many events are showing. Any column heading sorts the list, and
 `Open…` loads another results file.
+
+### At the telescope
+
+Select an event and press `Observe…` — or double-click its row — to open a
+separate countdown window to keep in view while you shoot. Several can be open
+at once, which is what back-to-back passes need.
+
+![The observing window: a large countdown to ingress, a timeline that zooms in
+as the moment approaches, and the ingress, mid, egress and duration
+times.](docs/observing-window.png)
+
+A transit lasts well under a second, so what matters is the approach to it. The
+countdown is the main display and escalates as it runs down — plain, then amber
+under a minute, then red under ten seconds, then green while the satellite is
+actually crossing, when it reads `TRANSIT` and counts the fractions elapsed.
+The timeline underneath zooms with it, from a ten-minute view down to a few
+seconds, so the marker is always visibly moving instead of frozen at a scale
+where nothing happens.
+
+Near misses never touch the disk, so they have no ingress: those count down to
+the closest approach instead, and say so.
+
+The element age is shown because it is the honest limit on all of this — the
+arithmetic is good to a millisecond, but a week-old element set is not. The
+clock is your computer's, so keep it synchronised if you care about the tenths.
 
 It uses the same PyQt6 framework and theme as the TURM Control GUI. The theme
 follows `gui.theme` in the config file (`dark` or `light`); `--theme` overrides
