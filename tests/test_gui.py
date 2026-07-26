@@ -781,3 +781,77 @@ def test_the_configured_recording_lead_reaches_the_observing_window(app):
     assert opened._lead_seconds == 30.0
     assert "14:43:25" in [w.text() for w in opened.findChildren(QLabel)]
     opened.close()
+
+
+def test_no_detail_row_name_is_used_twice():
+    # The rows are held in a dict keyed by name, so a duplicate would mean one
+    # of them silently never updated.
+    import collections
+
+    from sattransit.gui import _DETAIL_LAYOUT
+
+    names = [name for _, rows in _DETAIL_LAYOUT for name in rows]
+    assert [n for n, c in collections.Counter(names).items() if c > 1] == []
+
+
+# --- the element-age uncertainty band ----------------------------------------
+
+WITH_BAND = {
+    **TRANSIT,
+    "uncertainty": {
+        "element_age_days": 3.0,
+        "cross_track_km": 0.15,
+        "along_track_km": 3.3,
+        "cross_track_arcsec": 52.0,
+        "timing_seconds": 0.36,
+        "could_be_transit": True,
+        "could_miss": False,
+    },
+}
+
+
+def test_the_disk_view_paints_with_a_band(app):
+    view = DiskView(THEMES["dark"])
+    view.resize(400, 360)
+    view.set_event(WITH_BAND)
+    assert not view.grab().isNull()
+
+
+def test_a_band_wider_than_the_disk_still_paints(app):
+    # A very old element set: the band swamps everything, but must not break.
+    view = DiskView(THEMES["dark"])
+    view.resize(400, 360)
+    view.set_event({**WITH_BAND, "uncertainty": {**WITH_BAND["uncertainty"],
+                                                "cross_track_arcsec": 5000.0}})
+    assert not view.grab().isNull()
+
+
+def test_an_event_without_an_uncertainty_block_still_paints(app):
+    # Results written before the band existed, or with uncertainty disabled.
+    view = DiskView(THEMES["dark"])
+    view.resize(400, 360)
+    view.set_event(TRANSIT)
+    assert not view.grab().isNull()
+
+
+def test_the_details_report_the_band(app):
+    values = _detail_values(WITH_BAND)
+    assert values["Chord band"] == "± 52″ sideways"
+    assert values["Timing"] == "± 0.36 s"
+    assert values["Outcome"] == "transit is safe"
+
+
+def test_the_details_warn_when_a_transit_could_miss():
+    event = {**WITH_BAND, "uncertainty": {**WITH_BAND["uncertainty"], "could_miss": True}}
+    assert _detail_values(event)["Outcome"] == "could miss"
+
+
+def test_the_details_flag_a_near_miss_that_could_be_a_transit():
+    event = {**WITH_BAND, "type": "near_miss", "transit": None}
+    assert _detail_values(event)["Outcome"] == "could be a transit"
+
+
+def test_the_details_are_blank_without_an_uncertainty_block():
+    values = _detail_values(TRANSIT)
+    for row in ("Chord band", "Timing", "Outcome"):
+        assert values[row] is None

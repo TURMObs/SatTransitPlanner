@@ -13,6 +13,7 @@ from .finder import Event
 from .elements import Catalog
 from .favorites import Favorites
 from .sizes import GCAT_CITATION
+from .uncertainty import estimate as estimate_uncertainty
 
 
 def _iso(value: datetime) -> str:
@@ -160,6 +161,41 @@ def _illumination_to_dict(event: Event) -> dict | None:
     }
 
 
+def _uncertainty_to_dict(event: Event, config: Config, element_age_days: float) -> dict | None:
+    """What the element set's age costs this prediction.
+
+    Cross-track decides whether the disk is crossed at all; along-track decides
+    when. Both are reported, with the flags that say whether the predicted
+    outcome could actually go the other way.
+    """
+    if not config.uncertainty.enabled:
+        return None
+    estimate = estimate_uncertainty(
+        element_age_days,
+        event.range_km,
+        event.angular_velocity_deg_per_s,
+        cross_track_km_per_day=config.uncertainty.cross_track_km_per_day,
+        along_track_km_per_day=config.uncertainty.along_track_km_per_day,
+    )
+    if estimate is None:
+        return None
+
+    separation = event.separation_deg * 3600.0
+    radius = event.target_radius_deg * 3600.0
+    return {
+        "element_age_days": _round(element_age_days, 3),
+        "cross_track_km": _round(estimate.cross_track_km, 3),
+        "along_track_km": _round(estimate.along_track_km, 3),
+        # Sideways on the disk: how far the chord could really lie from where
+        # it is drawn.
+        "cross_track_arcsec": _round(estimate.cross_track_arcsec, 1),
+        # How early or late the satellite could arrive.
+        "timing_seconds": _round(estimate.timing_seconds, 3),
+        "could_be_transit": estimate.could_be_transit(separation, radius),
+        "could_miss": estimate.could_miss(separation, radius),
+    }
+
+
 def _event_to_dict(event: Event, tz: ZoneInfo, config: Config) -> dict:
     entry = event.entry
     satellite = entry.satellite
@@ -208,6 +244,7 @@ def _event_to_dict(event: Event, tz: ZoneInfo, config: Config) -> dict:
         },
         "illumination": _illumination_to_dict(event),
         "size": _size_to_dict(event),
+        "uncertainty": _uncertainty_to_dict(event, config, element_age_days),
     }
 
     if config.output.include_path:

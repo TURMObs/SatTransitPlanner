@@ -39,6 +39,12 @@
     "limb": "any"
   },
 
+  "uncertainty": {
+    "enabled": true,
+    "cross_track_km_per_day": 0.05,
+    "along_track_km_per_day": 1.1
+  },
+
   "sizes": {
     "enabled": true,
     "url": "https://planet4589.org/space/gcat/tsv/cat/satcat.tsv",

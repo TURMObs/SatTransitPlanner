@@ -451,6 +451,7 @@ class DiskView(QWidget):
         self._theme = theme
         self._event = None
         self._target = "sun"
+        self._disk_clip = QPainterPath()
         self.setMinimumSize(320, 280)
 
     def set_event(self, event: dict | None):
@@ -512,7 +513,12 @@ class DiskView(QWidget):
         else:
             self._draw_sun(painter, cx, cy, radius_px)
 
+        self._disk_clip = QPainterPath()
+        self._disk_clip.addEllipse(QPointF(cx, cy), radius_px, radius_px)
+
         colours = [self._point_colour(x, y, illumination) for x, y in points]
+        # Under the chord, so the chord itself stays the clearest thing drawn.
+        self._draw_uncertainty(painter, to_screen, points, scale)
         self._draw_track(painter, to_screen, points, cx, cy, radius_px, colours)
         self._draw_marker(painter, to_screen, approach, illumination)
         self._draw_annotations(painter, rect, disk_radius, illumination)
@@ -581,10 +587,61 @@ class DiskView(QWidget):
         lit_face = delta <= 90.0
         return QColor(self._theme["track"] if lit_face else self._theme["sat_bright"])
 
+    def _draw_uncertainty(self, painter, to_screen, points, scale):
+        """A band either side of the chord, for the age of the element set.
+
+        Old elements move a satellite sideways as well as along its track, so
+        the true chord may lie anywhere within this band. It is what turns a
+        near miss that grazes the limb into "this could really be a transit".
+        Drawn only when it is wide enough to mean anything.
+        """
+        band = (self._event.get("uncertainty") or {}).get("cross_track_arcsec")
+        if not band or len(points) < 2:
+            return
+        half = band * scale
+        if half < 1.0:  # narrower than a pixel: the elements are fresh
+            return
+
+        # Offset perpendicular to the chord, which is the cross-track direction.
+        (x0, y0), (x1, y1) = points[0], points[-1]
+        dx, dy = x1 - x0, y1 - y0
+        length = math.hypot(dx, dy)
+        if length <= 0:
+            return
+        nx, ny = -dy / length, dx / length
+
+        near = [to_screen(x + nx * band, y + ny * band) for x, y in points]
+        far = [to_screen(x - nx * band, y - ny * band) for x, y in points]
+        swath = QPolygonF(near + list(reversed(far)))
+
+        # Two passes, as for the chord: a translucent dark band reads on the
+        # bright disk, a light one on the sky behind it. One colour would
+        # vanish against one or the other.
+        for inside in (False, True):
+            painter.save()
+            if inside:
+                painter.setClipPath(self._disk_clip)
+                colour = QColor(self._theme["track"])
+                colour.setAlpha(90)
+            else:
+                colour = QColor(self._theme["track_outside"])
+                colour.setAlpha(60)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(colour))
+            painter.drawPolygon(swath)
+
+            # Edges, so the band has a definite extent rather than fading out.
+            edge = QColor(colour)
+            edge.setAlpha(150)
+            painter.setPen(QPen(edge, 1.0, Qt.PenStyle.DashLine))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawPolyline(QPolygonF(near))
+            painter.drawPolyline(QPolygonF(far))
+            painter.restore()
+
     def _draw_track(self, painter, to_screen, points, cx, cy, radius_px, colours):
         polygon = QPolygonF([to_screen(x, y) for x, y in points])
-        clip = QPainterPath()
-        clip.addEllipse(QPointF(cx, cy), radius_px, radius_px)
+        clip = self._disk_clip
 
         # Off the disk the satellite is not visible: a faint dashed line for the
         # whole chord, drawn first and overpainted inside the disk.
@@ -651,7 +708,14 @@ class DiskView(QWidget):
         else:
             caption = f"solar radius {disk_radius:.0f}″  ·  ⌀ {disk_radius / 30:.1f}′"
         painter.drawText(10, 18, caption)
-        painter.drawText(10, rect.height() - 8, "dots mark equal time steps")
+        # Kept short: the pane is narrow and the caption must not clip.
+        band = (self._event or {}).get("uncertainty", {}).get("cross_track_arcsec")
+        caption = (
+            "dots: equal time steps  ·  band: element age"
+            if band
+            else "dots mark equal time steps"
+        )
+        painter.drawText(10, rect.height() - 8, caption)
 
         # Compass, bottom right so it stays clear of the captions.
         ox, oy, arm = rect.width() - 30, rect.height() - 30, 16
@@ -1176,6 +1240,8 @@ _DETAIL_LAYOUT = [
     # Blank for a solar event, whose disk is always full and satellites sunlit.
     ("ILLUMINATION", ["Moon phase", "Illuminated", "Crossing limb", "Satellite lit"]),
     ("SIZE", ["Dimensions", "Shape", "Apparent size", "Size source"]),
+    # What the age of the element set costs; see sattransit/uncertainty.py.
+    ("UNCERTAINTY", ["Chord band", "Timing", "Outcome"]),
 ]
 
 
@@ -1188,6 +1254,7 @@ def _detail_values(event: dict) -> dict:
     offset = approach.get("chord_offset_fraction")
     size = event.get("size")
     lit = event.get("illumination")
+    doubt = event.get("uncertainty")
     values = {
         "Name": satellite["name"],
         "NORAD id": satellite["norad_id"],
@@ -1232,8 +1299,18 @@ def _detail_values(event: dict) -> dict:
             else f"{size['angular_min_arcsec']:.2f}″ – {size['angular_max_arcsec']:.2f}″"
         ),
         "Size source": None if size is None else size.get("source"),
+        "Chord band": None if doubt is None else f"± {doubt['cross_track_arcsec']:.0f}″ sideways",
+        "Timing": None if doubt is None else f"± {doubt['timing_seconds']:.2f} s",
+        "Outcome": None if doubt is None else _outcome(event, doubt),
     }
     return values
+
+
+def _outcome(event: dict, doubt: dict) -> str:
+    """Whether the band leaves the predicted outcome in doubt."""
+    if event.get("type") == "disk_transit":
+        return "could miss" if doubt.get("could_miss") else "transit is safe"
+    return "could be a transit" if doubt.get("could_be_transit") else "misses clearly"
 
 
 # --- Entry point -------------------------------------------------------------

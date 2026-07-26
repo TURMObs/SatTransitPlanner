@@ -337,6 +337,8 @@ everything else has defaults.
 | `search.satellite_sizes_m` | Overrides for the size catalogue. Key: a NORAD id or a name glob (`STARLINK-*`). Value: one number, or `[min, max]` metres |
 | `illumination.satellite` | Keep events by satellite lighting: `any` (default), `sunlit`, or `eclipsed`. Only bites for the Moon |
 | `illumination.limb` | Keep events by which limb they cross: `any` (default), `lit`, or `dark`. Only bites for the Moon |
+| `uncertainty.enabled` | Estimate what the element set's age costs, and draw it (default true). See *How much to trust a prediction* |
+| `uncertainty.cross_track_km_per_day`, `uncertainty.along_track_km_per_day` | Error growth rates. Defaults are measured medians; raise them to be cautious |
 | `sizes.enabled` | Look up physical dimensions at all (default true) |
 | `spacetrack.enabled` | Add the LEO rocket bodies CelesTrak has no group for. Needs an account; see *Rocket bodies from Space-Track* |
 | `spacetrack.max_age_days`, `spacetrack.min_mean_motion` | When to refresh, and the low-orbit cut (11.25 rev/day ≈ a 128 min period) |
@@ -469,6 +471,9 @@ which element files were used and when they were fetched), `statistics`, and
   and whether the satellite is sunlit. `null` for the Sun. See *Lunar transits*.
 - `size` — the satellite's dimensions and what they subtend at this range, or
   `null` when it is not in the catalogue. See *Satellite sizes*.
+- `uncertainty` — what the element set's age costs: the sideways band on the
+  disk, the timing error, and whether the predicted outcome could go the other
+  way. See *How much to trust a prediction*.
 - `path` — samples of the satellite's offset from the target's centre
   (`dx_arcsec` east, `dy_arcsec` north), spanning the transit. Intended for
   drawing the chord across the disk.
@@ -520,6 +525,57 @@ radar cross-section, but it is present for only ~18% of on-orbit payloads and is
 a *radar* quantity — an equivalent disc from the ISS's 399 m² RCS is 22 m
 against a true 109 m span. ESA's DISCOS holds real dimensions but needs an
 account.
+
+## How much to trust a prediction
+
+The arithmetic is good to a millisecond. The elements are not, and for a
+one-second transit that is the whole error budget — so each event carries an
+`uncertainty` block, and the disk view draws it as a band either side of the
+chord.
+
+An ageing element set moves a prediction two ways, and they matter quite
+differently:
+
+- **Cross-track**, sideways. This shifts the chord across the disk, so it
+  decides *whether* the satellite crosses at all. It is the band you see.
+- **Along-track**, forwards or backwards along the orbit. This leaves the chord
+  where it is and makes the satellite arrive early or late, so it decides
+  *when*.
+
+![The same near miss with element sets of three ages: a hairline band with fresh
+elements, a visible one after a week, and after a month a band wide enough to
+overlap the disk — at which point the near miss could really be a
+transit.](docs/uncertainty-band.png)
+
+The rates were measured rather than assumed. Where two cached CelesTrak groups
+carry element sets of different ages for the same satellite, propagating the
+older one forward to the newer one's epoch and comparing gives the accumulated
+error directly. Across 38 low-orbit satellites, at ages around ten days:
+
+| component | median | 75th | 90th | max |
+| --- | --- | --- | --- | --- |
+| along-track | 1.11 | 5.40 | 20.78 | 357 km/day |
+| cross-track | 0.049 | 0.084 | 0.188 | 0.32 km/day |
+
+Two things follow. **Along-track dominates by a factor of about twenty**, so a
+predicted transit is usually missed by mistiming rather than by the chord being
+in the wrong place — with day-old elements, a ±0.15 s timing error against a
+one-second transit. And **cross-track is small and well behaved**, so with fresh
+elements the hit-or-miss verdict really is reliable: the band is a few
+arcseconds against a 945″ solar radius, and only an element set weeks old opens
+it wide enough to turn a near miss into a possible transit.
+
+The defaults are the medians — a typical satellite, not a worst case. The
+spread is wide, especially along-track where a manoeuvring or high-drag
+satellite is far worse, so `uncertainty.cross_track_km_per_day` and
+`uncertainty.along_track_km_per_day` are there to be raised by a cautious
+observer, or the whole thing switched off with `uncertainty.enabled`.
+
+Be clear about what this is: SGP4 publishes no covariances, the rates were
+measured at around ten days and are applied linearly — reasonable for
+cross-track, optimistic for along-track, where drag makes the error grow faster
+than linearly. It is a calibrated rule of thumb, a band to think with rather
+than a number to quote.
 
 ## How the search works
 

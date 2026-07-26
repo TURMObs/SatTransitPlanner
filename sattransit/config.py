@@ -10,6 +10,7 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .sizes import parse_overrides
+from .uncertainty import ALONG_TRACK_KM_PER_DAY, CROSS_TRACK_KM_PER_DAY
 
 # Both frontends fall back to this when no configuration file is named.
 DEFAULT_CONFIG_FILE = "config.json"
@@ -110,6 +111,19 @@ class IlluminationConfig:
 
 
 @dataclass
+class UncertaintyConfig:
+    """How far an element set's age is taken to move a prediction.
+
+    Rates in kilometres of error per day of element age; the defaults are
+    medians measured from real element sets. See sattransit/uncertainty.py.
+    """
+
+    enabled: bool = True
+    cross_track_km_per_day: float = CROSS_TRACK_KM_PER_DAY
+    along_track_km_per_day: float = ALONG_TRACK_KM_PER_DAY
+
+
+@dataclass
 class FavoritesConfig:
     file: str = "favorites.json"
 
@@ -129,6 +143,7 @@ class Config:
     target: str = "sun"
     search: SearchConfig = field(default_factory=SearchConfig)
     illumination: IlluminationConfig = field(default_factory=IlluminationConfig)
+    uncertainty: UncertaintyConfig = field(default_factory=UncertaintyConfig)
     sizes: SizesConfig = field(default_factory=SizesConfig)
     spacetrack: SpaceTrackConfig = field(default_factory=SpaceTrackConfig)
     favorites: FavoritesConfig = field(default_factory=FavoritesConfig)
@@ -202,8 +217,8 @@ def load_config(path: str | Path) -> Config:
         raise ConfigError(f"{path}: top level must be a JSON object")
 
     known_top = {
-        "observatory", "celestrak", "target", "search", "illumination", "sizes", "spacetrack",
-        "favorites", "output", "gui", "cache_dir", "ephemeris",
+        "observatory", "celestrak", "target", "search", "illumination", "uncertainty",
+        "sizes", "spacetrack", "favorites", "output", "gui", "cache_dir", "ephemeris",
     }
     unknown = set(raw) - known_top
     if unknown:
@@ -222,6 +237,7 @@ def load_config(path: str | Path) -> Config:
         target=raw.get("target", "sun"),
         search=_build(SearchConfig, raw.get("search", {}), "search"),
         illumination=_build(IlluminationConfig, raw.get("illumination", {}), "illumination"),
+        uncertainty=_build(UncertaintyConfig, raw.get("uncertainty", {}), "uncertainty"),
         sizes=_build(SizesConfig, raw.get("sizes", {}), "sizes"),
         spacetrack=_build(SpaceTrackConfig, raw.get("spacetrack", {}), "spacetrack"),
         favorites=_build(FavoritesConfig, raw.get("favorites", {}), "favorites"),
@@ -290,6 +306,11 @@ def _validate(config: Config) -> None:
         raise ConfigError(
             f"illumination.limb: must be 'any', 'lit' or 'dark', not {config.illumination.limb!r}"
         )
+
+    if config.uncertainty.cross_track_km_per_day < 0:
+        raise ConfigError("uncertainty.cross_track_km_per_day: must not be negative")
+    if config.uncertainty.along_track_km_per_day < 0:
+        raise ConfigError("uncertainty.along_track_km_per_day: must not be negative")
 
     if config.gui.theme not in ("dark", "light"):
         raise ConfigError(f"gui.theme: must be 'dark' or 'light', not {config.gui.theme!r}")
