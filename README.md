@@ -102,6 +102,14 @@ local time                     type         satellite                     size  
 Other options: `--refresh` forces a re-download of the catalogues, `--offline`
 works from the cache and never uses the network, `-q` silences progress output.
 
+`--ignore-element-age` searches satellites whose elements are older than
+`search.max_element_age_days` instead of skipping them. Useful when working
+offline from an ageing cache, or when looking far ahead — but the limit exists
+for a reason, and the predictions it lets through are correspondingly less
+trustworthy. The run says how old the oldest element set it used was, each event
+still reports its own `element_age_days`, and the result file records
+`max_element_age_days: null` so a file made this way is recognisable later.
+
 ## Favourites
 
 Searching every active satellite over a week takes minutes. `--favorites`

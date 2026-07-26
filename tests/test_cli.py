@@ -82,3 +82,50 @@ def test_the_viewer_opens_the_default_config_when_there_is_one(tmp_path, monkeyp
     )
     assert args.config or Path(gui.DEFAULT_CONFIG_FILE).is_file()
     assert os.path.isfile("config.json")
+
+
+# --- ignoring the element age ------------------------------------------------
+
+
+def test_the_element_age_limit_is_kept_by_default():
+    args = cli.build_parser().parse_args(["--start", "now", "--duration", "1h"])
+    assert args.ignore_element_age is False
+
+
+def test_the_element_age_limit_can_be_ignored():
+    args = cli.build_parser().parse_args(
+        ["--start", "now", "--duration", "1h", "--ignore-element-age"]
+    )
+    assert args.ignore_element_age is True
+
+
+def test_ignoring_the_age_lifts_the_limit_rather_than_raising_it(tmp_path, monkeypatch):
+    # Every age test compares against this one number, so setting it to
+    # infinity is what makes the loaders keep everything.
+    import math
+
+    from sattransit.elements import ElementsError
+
+    config_file = tmp_path / "config.json"
+    config_file.write_text(
+        '{"observatory": {"name": "T", "latitude_deg": 0, "longitude_deg": 0},'
+        ' "celestrak": {"groups": ["stations"]},'
+        ' "search": {"max_element_age_days": 2.0}}'
+    )
+
+    seen = {}
+
+    def fake_load_catalog(*args, **kwargs):
+        seen["max_age"] = kwargs["max_element_age_days"]
+        raise ElementsError("stop here")
+
+    monkeypatch.setattr(cli, "load_catalog", fake_load_catalog)
+
+    cli.main(["--config", str(config_file), "--start", "now", "--duration", "1h"])
+    assert seen["max_age"] == 2.0
+
+    cli.main(
+        ["--config", str(config_file), "--start", "now", "--duration", "1h",
+         "--ignore-element-age"]
+    )
+    assert math.isinf(seen["max_age"])

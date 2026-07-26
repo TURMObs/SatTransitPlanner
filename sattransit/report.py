@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import math
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -69,7 +70,13 @@ def build_report(
             "sizes": ("gcat" if config.sizes.enabled else "off"),
             "coarse_step_seconds": config.search.coarse_step_seconds,
             "fine_step_seconds": config.search.fine_step_seconds,
-            "max_element_age_days": config.search.max_element_age_days,
+            # null rather than Infinity: the latter is not valid JSON, and a
+            # missing limit is exactly what null means.
+            "max_element_age_days": (
+                None
+                if math.isinf(config.search.max_element_age_days)
+                else config.search.max_element_age_days
+            ),
             "ephemeris": config.ephemeris,
         },
         "attribution": [

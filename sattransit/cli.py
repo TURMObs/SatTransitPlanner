@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 import time
 from datetime import datetime, timezone
@@ -59,6 +60,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
+        "--ignore-element-age",
+        action="store_true",
+        help="search satellites whose elements are older than "
+        "search.max_element_age_days, instead of skipping them. Their positions "
+        "will be correspondingly less trustworthy",
+    )
+    parser.add_argument(
         "--favorites",
         nargs="?",
         const=True,
@@ -113,6 +121,10 @@ def main(argv: list[str] | None = None) -> int:
             config.celestrak.offline = True
         if args.target:
             config.target = args.target
+        if args.ignore_element_age:
+            # Every age test is a comparison against this, so lifting it here
+            # is enough; nothing downstream has to know.
+            config.search.max_element_age_days = math.inf
 
         tz = config.observatory.zoneinfo()
         if not making:
@@ -136,6 +148,8 @@ def main(argv: list[str] | None = None) -> int:
             f"({(end_dt - start_dt).total_seconds() / 3600.0:.2f} h)"
         )
     log("Elements    :")
+    if args.ignore_element_age:
+        log("              age limit ignored: old element sets are searched too")
 
     try:
         # Regenerating the list has no window, so judge element age against now.
@@ -238,6 +252,12 @@ def main(argv: list[str] | None = None) -> int:
             else ""
         )
     )
+    if args.ignore_element_age and catalog.entries:
+        oldest = max(
+            abs((entry.epoch_utc - reference).total_seconds()) / 86400.0
+            for entry in catalog.entries
+        )
+        log(f"              oldest element set in the search: {oldest:.1f} d")
 
     target = Target(config.target, ephemeris)
     finder = TransitFinder(config, ephemeris, timescale, target, sizes)
