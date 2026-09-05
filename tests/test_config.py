@@ -254,3 +254,19 @@ def test_an_unknown_instrument_option_is_rejected(tmp_path):
     raw = {**MINIMAL, "instrument": {"flip_diagonal": True}}
     with pytest.raises(ConfigError, match="flip_diagonal"):
         load_config(write(tmp_path, raw))
+
+
+def test_the_meridian_side_defaults_to_any(tmp_path):
+    assert load_config(write(tmp_path, MINIMAL)).instrument.meridian_side == "any"
+
+
+@pytest.mark.parametrize("side", ["any", "east", "west"])
+def test_a_meridian_side_is_accepted(tmp_path, side):
+    raw = {**MINIMAL, "instrument": {"meridian_side": side}}
+    assert load_config(write(tmp_path, raw)).instrument.meridian_side == side
+
+
+def test_a_nonsense_meridian_side_is_rejected(tmp_path):
+    raw = {**MINIMAL, "instrument": {"meridian_side": "sometimes"}}
+    with pytest.raises(ConfigError, match="meridian_side"):
+        load_config(write(tmp_path, raw))

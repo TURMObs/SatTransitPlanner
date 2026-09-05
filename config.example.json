@@ -71,6 +71,7 @@
   "instrument": {
     "flip_horizontal": false,
     "flip_vertical": false,
+    "meridian_side": "any",
     "fields_of_view": [
       {
         "name": "ASI2600MM @ 2350mm",

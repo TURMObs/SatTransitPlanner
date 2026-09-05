@@ -1056,3 +1056,112 @@ def test_closing_the_window_stops_a_running_search(app, tmp_path):
     window._runner.cancel = lambda: stopped.append(True)
     window.close()
     assert stopped, "a search must not outlive the window that started it"
+
+
+# --- the meridian flip -------------------------------------------------------
+
+# TRANSIT's target sits at azimuth 255, altitude 41: west of the meridian.
+DARMSTADT = 49.8775
+
+
+def test_without_a_latitude_the_meridian_is_unknown(app):
+    # An older results file, or one from a site the report does not describe.
+    view = DiskView(THEMES["dark"], InstrumentConfig(meridian_side="east"))
+    view.set_event(TRANSIT)
+    assert view._side_of_meridian() is None
+    assert view._flips == (1.0, 1.0)  # nothing to flip on
+
+
+def test_the_side_of_the_meridian_is_read_off_the_event(app):
+    view = DiskView(THEMES["dark"])
+    view.set_latitude(DARMSTADT)
+    view.set_event(TRANSIT)
+    assert view._side_of_meridian() == "west"
+
+
+def test_the_reference_side_is_drawn_as_configured(app):
+    view = DiskView(THEMES["dark"], InstrumentConfig(meridian_side="west"))
+    view.set_latitude(DARMSTADT)
+    view.set_event(TRANSIT)  # also west
+    assert not view._turned_over()
+    assert view._flips == (1.0, 1.0)
+
+
+def test_the_far_side_of_the_meridian_is_turned_over(app):
+    view = DiskView(THEMES["dark"], InstrumentConfig(meridian_side="east"))
+    view.set_latitude(DARMSTADT)
+    view.set_event(TRANSIT)  # west of the meridian, so the mount has flipped
+    assert view._turned_over()
+    assert view._flips == (-1.0, -1.0)
+
+
+def test_turning_over_is_a_rotation_not_a_mirror(app):
+    # A meridian flip swings the mount to the other side of the pier; the
+    # optical path is unchanged, so the field turns 180 degrees and keeps its
+    # handedness. Both axes negate together, never just one.
+    for horizontal, vertical in [(False, False), (True, False), (False, True), (True, True)]:
+        plain = DiskView(THEMES["dark"], InstrumentConfig(horizontal, vertical))
+        flipped = DiskView(
+            THEMES["dark"], InstrumentConfig(horizontal, vertical, meridian_side="east")
+        )
+        for view in (plain, flipped):
+            view.set_latitude(DARMSTADT)
+            view.set_event(TRANSIT)
+        assert flipped._flips == tuple(-f for f in plain._flips)
+
+
+def test_any_leaves_the_orientation_alone_on_both_sides(app):
+    view = DiskView(THEMES["dark"], InstrumentConfig(flip_horizontal=True))
+    view.set_latitude(DARMSTADT)
+    view.set_event(TRANSIT)
+    assert not view._turned_over()
+    assert view._flips == (-1.0, 1.0)
+
+
+def test_a_configured_meridian_side_is_mentioned_in_the_tooltip(app):
+    view = DiskView(THEMES["dark"], InstrumentConfig(meridian_side="east"))
+    assert "meridian" in view.toolTip()
+
+
+def test_the_details_report_the_hour_angle():
+    assert _detail_values(TRANSIT, DARMSTADT)["Hour angle"] == "3h 26m west"
+
+
+def test_the_hour_angle_is_blank_without_a_latitude():
+    assert _detail_values(TRANSIT)["Hour angle"] is None
+
+
+# --- the tightened view ------------------------------------------------------
+
+
+def test_the_disk_nearly_fills_the_pane(app):
+    # The padding is deliberately small: the disk is the subject.
+    view = DiskView(THEMES["dark"])
+    view.resize(400, 400)
+    view.set_event(TRANSIT)
+    assert _painted_disk_width(view) > 0.88 * 400
+
+
+def test_a_wide_near_miss_still_shows_the_event(app):
+    # The disk has to give way, or the marker would sit off the edge.
+    view = DiskView(THEMES["dark"])
+    view.resize(400, 400)
+    view.set_event(NEAR_MISS)  # 2909" from a 944" disk
+    assert 0 < _painted_disk_width(view) < 0.6 * 400
+
+
+def test_a_landscape_field_is_fitted_to_the_pane_not_to_its_diagonal(app):
+    # Fitting a circle would reserve room for the corner in a direction
+    # nothing reaches, and shrink the disk for no reason.
+    from sattransit.gui import _fov_half_extents
+
+    east, north = _fov_half_extents(
+        FieldOfView(name="f", width_arcmin=40.0, height_arcmin=20.0)
+    )
+    assert (east, north) == (1200.0, 600.0)
+
+
+def test_a_circular_field_reaches_the_same_way_in_both_directions():
+    from sattransit.gui import _fov_half_extents
+
+    assert _fov_half_extents(FieldOfView(name="f", diameter_arcmin=60.0)) == (1800.0, 1800.0)

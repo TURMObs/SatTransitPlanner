@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from .mount import SIDES
 from .sizes import parse_overrides
 from .uncertainty import ALONG_TRACK_KM_PER_DAY, CROSS_TRACK_KM_PER_DAY
 
@@ -166,6 +167,12 @@ class InstrumentConfig:
 
     flip_horizontal: bool = False
     flip_vertical: bool = False
+    # Which side of the meridian the flips above describe. A German equatorial
+    # mount swings to the other side of the pier there and holds the camera
+    # turned over, so the other side is drawn rotated by 180 degrees. "any"
+    # (the default) means the orientation never changes: a fork, an alt-az
+    # mount with a derotator, or a view no one is matching to a camera.
+    meridian_side: str = "any"
     fields_of_view: list[FieldOfView] = field(default_factory=list)
 
 
@@ -379,6 +386,12 @@ def _validate(config: Config) -> None:
         raise ConfigError("uncertainty.cross_track_km_per_day: must not be negative")
     if config.uncertainty.along_track_km_per_day < 0:
         raise ConfigError("uncertainty.along_track_km_per_day: must not be negative")
+
+    if config.instrument.meridian_side not in SIDES:
+        raise ConfigError(
+            f"instrument.meridian_side: must be one of {', '.join(SIDES)}, "
+            f"not {config.instrument.meridian_side!r}"
+        )
 
     for index, fov in enumerate(config.instrument.fields_of_view):
         where = f"instrument.fields_of_view[{index}]"

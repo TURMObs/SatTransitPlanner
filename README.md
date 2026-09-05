@@ -250,9 +250,14 @@ whether an event is worth shooting.
 
 The **disk view** shows the target with the satellite's chord across it: dark
 where the satellite is a silhouette on the disk, faint and dashed where it is
-off it. Dots mark equal steps in time, so their spacing shows how fast the
-satellite is moving. For the Moon it draws the phase, and the chord follows the
-illumination — see *Lunar transits*.
+off it, with an arrowhead giving the direction of travel. For the Moon it draws
+the phase, and the chord follows the illumination — see *Lunar transits*.
+
+The disk and any field of view are fitted to the pane with little to spare. The
+chord's tails are allowed to run past the edge and be clipped — how far the
+satellite came from adds nothing, and fitting it would only shrink the disk —
+but the closest approach is always on screen, so a wide near miss zooms out
+until you can see it.
 
 The **sky view** puts every listed event where it happens in the sky, zenith at
 the centre and horizon at the rim, so the run of dots also traces the Sun's path
@@ -360,13 +365,39 @@ corner follows the flips, so it always says which way round the view is, and
 the view's tooltip says it in words.
 
 **The fields of view** are drawn over the disk as dashed outlines, centred on
-the target, each labelled. Give either `width_arcmin` with `height_arcmin` for a
-camera, or `diameter_arcmin` for a circular field; `position_angle_deg` turns a
-rectangle east of north, the same angle a rotator reports. A field wider than
-the disk pulls the view out to fit — that is the honest picture of what the
-camera sees, and it makes plain when a transit will fall outside the frame.
+the target. Give either `width_arcmin` with `height_arcmin` for a camera, or
+`diameter_arcmin` for a circular field; `position_angle_deg` turns a rectangle
+east of north, the same angle a rotator reports. A field wider than the disk
+pulls the view out to fit — that is the honest picture of what the camera sees,
+and it makes plain when a transit will fall outside the frame.
 
-Both are display only: they change nothing in the search or the results file.
+**`meridian_side`** handles a German equatorial mount. It cannot follow a target
+past the meridian without swinging to the other side of the pier, and that turns
+the camera over: the same patch of sky lands on the chip rotated by 180°. So a
+chart that matched the screen all morning stops matching it in the afternoon,
+which is an expensive thing to discover during a one-second transit.
+
+Set it to the side of the meridian your flips describe — `east` or `west` — and
+events on the other side are drawn rotated. `any`, the default, means the
+orientation never changes: a fork mount, an alt-azimuth mount with a derotator,
+or a view nobody is matching to a camera. Which side counts as "not turned over"
+depends on how your camera happens to be clocked, so there is no sensible
+default beyond leaving it off.
+
+The rotation is a rotation, not a mirror — the optical path does not change when
+the mount swings over — so both axes turn together and the view keeps its
+handedness. The compass follows, as always.
+
+The side is worked out from the target's altitude and azimuth with the exact
+horizontal-to-equatorial transform, so it needs no extra data in the results
+file and holds at any latitude. The details panel reports the hour angle
+(`3h 26m west`), which is worth a glance: near the meridian the drawn
+orientation is about to change, and real mounts often track some minutes past
+it before flipping, so close to zero the view is a prediction rather than a
+promise.
+
+All of this is display only: it changes nothing in the search or the results
+file.
 
 ## Configuration
 
@@ -403,6 +434,7 @@ everything else has defaults.
 | `favorites.file` | List used by `--favorites` when no file is given |
 | `output.file`, `output.indent`, `output.include_path` | Output file, JSON indentation, whether to emit `path` |
 | `instrument.flip_horizontal`, `instrument.flip_vertical` | Turn the disk view over to match a mirrored camera. See *Matching the telescope* |
+| `instrument.meridian_side` | Which side of the meridian the flips describe, for a German equatorial mount: `any` (default), `east`, `west` |
 | `instrument.fields_of_view` | Framing guides drawn over the disk: `name` with `width_arcmin`/`height_arcmin` or `diameter_arcmin`, and optional `position_angle_deg` |
 | `gui.theme` | Viewer theme: `dark` (default) or `light` |
 | `gui.recording_lead_seconds` | How far before mid-transit the observing window says to start recording (default 5) |

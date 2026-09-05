@@ -59,6 +59,8 @@ except ImportError:
 
 from . import __version__
 from .config import DEFAULT_CONFIG_FILE, ConfigError, InstrumentConfig, load_config
+from .mount import describe as describe_hour_angle
+from .mount import hour_angle_deg, is_turned_over, meridian_side
 from .compute import PRESETS, SearchRunner
 from .observe import RECORDING_LEAD_SECONDS
 
@@ -370,6 +372,15 @@ def _fov_corners(fov) -> list[tuple[float, float]]:
     ]
 
 
+def _fov_half_extents(fov) -> tuple[float, float]:
+    """How far a field reaches east and north of centre, in arcseconds."""
+    if fov.is_circle:
+        radius = fov.diameter_arcmin * 30.0
+        return radius, radius
+    corners = _fov_corners(fov)
+    return max(abs(x) for x, _ in corners), max(abs(y) for _, y in corners)
+
+
 def _offsets(separation_arcsec: float, position_angle_deg: float) -> tuple[float, float]:
     """Position angle (east of north) and separation back to east/north offsets."""
     angle = math.radians(position_angle_deg)
@@ -475,6 +486,7 @@ class DiskView(QWidget):
         self._target = "sun"
         self._disk_clip = QPainterPath()
         self._instrument = instrument or InstrumentConfig()
+        self._latitude_deg = None
         self.setMinimumSize(320, 280)
         self._describe_orientation()
 
@@ -486,6 +498,11 @@ class DiskView(QWidget):
         self._target = name
         self.update()
 
+    def set_latitude(self, latitude_deg: float | None):
+        """The observatory's latitude, needed to place the meridian."""
+        self._latitude_deg = latitude_deg
+        self.update()
+
     def set_instrument(self, instrument: InstrumentConfig):
         self._instrument = instrument
         self._describe_orientation()
@@ -493,11 +510,30 @@ class DiskView(QWidget):
 
     @property
     def _flips(self) -> tuple[float, float]:
-        """Signs for the east and north axes: -1 where the view is turned over."""
-        return (
-            -1.0 if self._instrument.flip_horizontal else 1.0,
-            -1.0 if self._instrument.flip_vertical else 1.0,
-        )
+        """Signs for the east and north axes: -1 where the view is turned over.
+
+        Past the meridian a German equatorial mount holds the camera upside
+        down, which negates both axes — a 180 degree rotation, not a mirror,
+        so the view stays the right way round, just the other way up.
+        """
+        fx = -1.0 if self._instrument.flip_horizontal else 1.0
+        fy = -1.0 if self._instrument.flip_vertical else 1.0
+        if self._turned_over():
+            fx, fy = -fx, -fy
+        return fx, fy
+
+    def _side_of_meridian(self) -> str | None:
+        """Which side of the meridian this event is on, if that can be known."""
+        geometry = (self._event or {}).get("geometry") or {}
+        altitude = geometry.get("target_altitude_deg")
+        azimuth = geometry.get("target_azimuth_deg")
+        if self._latitude_deg is None or altitude is None or azimuth is None:
+            return None
+        return meridian_side(altitude, azimuth, self._latitude_deg)
+
+    def _turned_over(self) -> bool:
+        side = self._side_of_meridian()
+        return side is not None and is_turned_over(side, self._instrument.meridian_side)
 
     def _describe_orientation(self):
         # The compass shows which way round the view is, but say it in words
@@ -510,11 +546,17 @@ class DiskView(QWidget):
             )
             if on
         ]
-        self.setToolTip(
+        base = (
             "Flipped " + " and ".join(flipped) + " to match the camera"
             if flipped
             else "North up, east left — the view of the sky"
         )
+        if self._instrument.meridian_side in ("east", "west"):
+            base += (
+                f"\nTurned over past the meridian; as written this is the "
+                f"{self._instrument.meridian_side}ern side"
+            )
+        self.setToolTip(base)
 
     def _track_points(self, event: dict) -> list[tuple[float, float]]:
         path = event.get("path") or []
@@ -547,19 +589,33 @@ class DiskView(QWidget):
         disk_radius = approach["target_radius_arcsec"]
         points = self._track_points(self._event)
 
-        # Fit whatever reaches furthest: the disk, the track, or a field of
-        # view. A field wider than the disk is the honest picture of what the
-        # camera sees, so it is allowed to pull the view out.
-        extent = max(
-            [disk_radius * 1.15]
-            + [math.hypot(x, y) * 1.08 for x, y in points]
-            + [fov.extent_arcsec() * 1.05 for fov in self._instrument.fields_of_view]
+        # Fit the disk and the fields of view snugly — they are the subject.
+        # The closest approach has to be on screen too, or a wide near miss
+        # would show an empty disk with the event off the edge. The track's
+        # tails are left out and allowed to run past the edge: how far the
+        # satellite came from adds nothing, and fitting it wastes the pane.
+        #
+        # East and north are measured separately and fitted against the pane's
+        # own width and height. Fitting a circle instead would reserve room for
+        # a landscape field's diagonal in a direction nothing reaches.
+        need_x = need_y = disk_radius
+        marker_x, marker_y = _offsets(
+            approach["separation_arcsec"], approach["position_angle_deg"]
         )
-        margin = 34
-        span = min(rect.width(), rect.height()) - 2 * margin
-        if span <= 0 or extent <= 0:
+        reach = [(abs(marker_x) * 1.1, abs(marker_y) * 1.1)]
+        reach += [_fov_half_extents(fov) for fov in self._instrument.fields_of_view]
+        for x, y in reach:
+            need_x, need_y = max(need_x, x), max(need_y, y)
+        need_x *= 1.03  # a hair of air, so nothing sits on the edge
+        need_y *= 1.03
+
+        margin = 14
+        scale = min(
+            (rect.width() / 2.0 - margin) / need_x,
+            (rect.height() / 2.0 - margin) / need_y,
+        )
+        if scale <= 0:
             return
-        scale = (span / 2.0) / extent
         cx, cy = rect.center().x(), rect.center().y()
 
         fx, fy = self._flips
@@ -678,23 +734,11 @@ class DiskView(QWidget):
             for fov in fields:
                 if fov.is_circle:
                     radius = fov.diameter_arcmin * 30.0 * scale
-                    centre = to_screen(0.0, 0.0)
-                    painter.drawEllipse(centre, radius, radius)
-                    anchor = QPointF(centre.x(), centre.y() - radius)
+                    painter.drawEllipse(to_screen(0.0, 0.0), radius, radius)
                 else:
-                    outline = QPolygonF([to_screen(x, y) for x, y in _fov_corners(fov)])
-                    painter.drawPolygon(outline)
-                    # Centre-top of the field, not a corner: a corner label
-                    # runs off the pane on a wide field.
-                    box = outline.boundingRect()
-                    anchor = QPointF(box.center().x(), box.top())
-
-                # Centred just above the field, in a solid pen: a dashed one
-                # would break up the lettering.
-                width = painter.fontMetrics().horizontalAdvance(fov.name)
-                painter.setPen(QPen(colour, 1.0))
-                painter.drawText(QPointF(anchor.x() - width / 2.0, anchor.y() - 5), fov.name)
-                painter.setPen(QPen(colour, 1.2, Qt.PenStyle.DashLine))
+                    painter.drawPolygon(
+                        QPolygonF([to_screen(x, y) for x, y in _fov_corners(fov)])
+                    )
             painter.restore()
 
     def _draw_uncertainty(self, painter, to_screen, points, scale):
@@ -760,33 +804,48 @@ class DiskView(QWidget):
         painter.setPen(QPen(faint, 1.4, Qt.PenStyle.DashLine))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawPolyline(polygon)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(faint))
-        for point in polygon:
-            painter.drawEllipse(point, 2.2, 2.2)
-        if len(polygon) >= 2:
-            self._draw_arrow(painter, polygon[-2], polygon[-1], faint)
         painter.restore()
 
         # Inside the disk, each segment takes the colour of its illumination, so
-        # a chord that crosses the terminator changes from dark to bright. Dots
-        # are equally spaced in time, so their spacing shows the speed.
+        # a chord that crosses the terminator changes from dark to bright.
         painter.save()
         painter.setClipPath(clip)
         for i in range(len(polygon) - 1):
             painter.setPen(QPen(colours[i], 2.6))
             painter.drawLine(polygon[i], polygon[i + 1])
-        painter.setPen(Qt.PenStyle.NoPen)
-        for point, colour in zip(polygon, colours):
-            painter.setBrush(QBrush(colour))
-            painter.drawEllipse(point, 3.0, 3.0)
-        if len(polygon) >= 2:
-            self._draw_arrow(painter, polygon[-2], polygon[-1], colours[-1])
         painter.restore()
+
+        self._draw_direction(painter, polygon, clip, colours[-1], faint)
+
+    def _draw_direction(self, painter, polygon, clip, inside_colour, outside_colour):
+        """One arrowhead, showing which way the satellite runs along the line.
+
+        Placed at the last point still inside the pane rather than at the end
+        of the track, which is usually clipped off the edge — an arrow no one
+        can see is no better than no arrow at all.
+        """
+        if len(polygon) < 2:
+            return
+        room = self.rect().adjusted(12, 12, -12, -12)
+        visible = [i for i, point in enumerate(polygon) if room.contains(point.toPoint())]
+        if not visible:
+            return
+        head = visible[-1]
+        if head == 0:
+            return
+        tip, tail = polygon[head], polygon[head - 1]
+
+        # Dark over the disk, light against the sky, as everywhere else here.
+        for inside in (False, True):
+            painter.save()
+            if inside:
+                painter.setClipPath(clip)
+            self._draw_arrow(painter, tail, tip, inside_colour if inside else outside_colour)
+            painter.restore()
 
     def _draw_arrow(self, painter, start: QPointF, end: QPointF, colour: QColor):
         angle = math.atan2(end.y() - start.y(), end.x() - start.x())
-        size = 7.0
+        size = 10.0
         wings = [
             end,
             QPointF(
@@ -820,12 +879,8 @@ class DiskView(QWidget):
         painter.drawText(10, 18, caption)
         # Kept short: the pane is narrow and the caption must not clip.
         band = (self._event or {}).get("uncertainty", {}).get("cross_track_arcsec")
-        caption = (
-            "dots: equal time steps  ·  band: element age"
-            if band
-            else "dots mark equal time steps"
-        )
-        painter.drawText(10, rect.height() - 8, caption)
+        if band:
+            painter.drawText(10, rect.height() - 8, "band: element age")
 
         # Compass, bottom right so it stays clear of the captions. The arms
         # follow the flips: north is not up once the view is turned over, and a
@@ -1170,6 +1225,7 @@ class ViewerWindow(QWidget):
 
         target = report.get("target", "sun")
         self._disk.set_target(target)
+        self._disk.set_latitude(self._latitude())
         observatory = report.get("observatory", {})
         subject = "Lunar Transits" if target == "moon" else "Solar Transits"
         self.setWindowTitle(f"{subject} — {observatory.get('name', 'Observatory')}")
@@ -1324,7 +1380,7 @@ class ViewerWindow(QWidget):
         self._disk.set_event(event)
         self._sky.set_selected(event)
         self._observe_btn.setEnabled(event is not None)
-        values = _detail_values(event) if event else {}
+        values = _detail_values(event, self._latitude()) if event else {}
         for name, row in self._detail_rows.items():
             row.set_value(values.get(name))
 
@@ -1360,6 +1416,10 @@ class ViewerWindow(QWidget):
         window.raise_()
 
     # --- running a search ----------------------------------------------------
+
+    def _latitude(self) -> float | None:
+        """The observatory's latitude, as the loaded results report it."""
+        return ((self._report or {}).get("observatory") or {}).get("latitude_deg")
 
     def _on_progress(self, text: str):
         self._status.setText(text)
@@ -1447,6 +1507,7 @@ _DETAIL_LAYOUT = [
             "Range",
             "Angular speed",
             "Direction of travel",
+            "Hour angle",
         ],
     ),
     # Blank for a solar event, whose disk is always full and satellites sunlit.
@@ -1457,7 +1518,7 @@ _DETAIL_LAYOUT = [
 ]
 
 
-def _detail_values(event: dict) -> dict:
+def _detail_values(event: dict, latitude_deg: float | None = None) -> dict:
     satellite = event["satellite"]
     approach = event["closest_approach"]
     geometry = event["geometry"]
@@ -1511,11 +1572,23 @@ def _detail_values(event: dict) -> dict:
             else f"{size['angular_min_arcsec']:.2f}″ – {size['angular_max_arcsec']:.2f}″"
         ),
         "Size source": None if size is None else size.get("source"),
+        # Where the mount will be pointing: near the meridian a German
+        # equatorial is about to swing over, and the orientation with it.
+        "Hour angle": _hour_angle_text(geometry, latitude_deg),
         "Chord band": None if doubt is None else f"± {doubt['cross_track_arcsec']:.0f}″ sideways",
         "Timing": None if doubt is None else f"± {doubt['timing_seconds']:.2f} s",
         "Outcome": None if doubt is None else _outcome(event, doubt),
     }
     return values
+
+
+def _hour_angle_text(geometry: dict, latitude_deg: float | None) -> str | None:
+    """The target's hour angle, as a mount owner reads it."""
+    altitude = geometry.get("target_altitude_deg")
+    azimuth = geometry.get("target_azimuth_deg")
+    if latitude_deg is None or altitude is None or azimuth is None:
+        return None
+    return describe_hour_angle(hour_angle_deg(altitude, azimuth, latitude_deg))
 
 
 def _outcome(event: dict, doubt: dict) -> str:
