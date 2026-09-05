@@ -44,6 +44,7 @@ try:
         QHBoxLayout,
         QHeaderView,
         QLabel,
+        QMenu,
         QMessageBox,
         QPushButton,
         QScrollArea,
@@ -57,7 +58,8 @@ except ImportError:
     sys.exit("PyQt6 is required for the GUI: pip install PyQt6")
 
 from . import __version__
-from .config import DEFAULT_CONFIG_FILE, ConfigError, load_config
+from .config import DEFAULT_CONFIG_FILE, ConfigError, InstrumentConfig, load_config
+from .compute import PRESETS, SearchRunner
 from .observe import RECORDING_LEAD_SECONDS
 
 # --- Themes ------------------------------------------------------------------
@@ -348,6 +350,26 @@ def _spans_days(window: dict) -> bool:
     return start.date() != end.date()
 
 
+def _fov_corners(fov) -> list[tuple[float, float]]:
+    """A field's corners as sky offsets (east, north) in arcseconds.
+
+    The field's height runs along its position angle, measured east of north —
+    the angle a camera rotator already reports.
+    """
+    theta = math.radians(fov.position_angle_deg)
+    up = (math.sin(theta), math.cos(theta))
+    right = (math.cos(theta), -math.sin(theta))
+    half_width = fov.width_arcmin * 30.0
+    half_height = fov.height_arcmin * 30.0
+    return [
+        (
+            sx * half_width * right[0] + sy * half_height * up[0],
+            sx * half_width * right[1] + sy * half_height * up[1],
+        )
+        for sx, sy in ((-1, 1), (1, 1), (1, -1), (-1, -1))
+    ]
+
+
 def _offsets(separation_arcsec: float, position_angle_deg: float) -> tuple[float, float]:
     """Position angle (east of north) and separation back to east/north offsets."""
     angle = math.radians(position_angle_deg)
@@ -446,13 +468,15 @@ class DiskView(QWidget):
     satellite is sunlit, and faint when it is eclipsed and so invisible.
     """
 
-    def __init__(self, theme: dict):
+    def __init__(self, theme: dict, instrument: InstrumentConfig | None = None):
         super().__init__()
         self._theme = theme
         self._event = None
         self._target = "sun"
         self._disk_clip = QPainterPath()
+        self._instrument = instrument or InstrumentConfig()
         self.setMinimumSize(320, 280)
+        self._describe_orientation()
 
     def set_event(self, event: dict | None):
         self._event = event
@@ -461,6 +485,36 @@ class DiskView(QWidget):
     def set_target(self, name: str):
         self._target = name
         self.update()
+
+    def set_instrument(self, instrument: InstrumentConfig):
+        self._instrument = instrument
+        self._describe_orientation()
+        self.update()
+
+    @property
+    def _flips(self) -> tuple[float, float]:
+        """Signs for the east and north axes: -1 where the view is turned over."""
+        return (
+            -1.0 if self._instrument.flip_horizontal else 1.0,
+            -1.0 if self._instrument.flip_vertical else 1.0,
+        )
+
+    def _describe_orientation(self):
+        # The compass shows which way round the view is, but say it in words
+        # too: a mirrored view is easy to miss and expensive to misread.
+        flipped = [
+            name
+            for name, on in (
+                ("horizontally", self._instrument.flip_horizontal),
+                ("vertically", self._instrument.flip_vertical),
+            )
+            if on
+        ]
+        self.setToolTip(
+            "Flipped " + " and ".join(flipped) + " to match the camera"
+            if flipped
+            else "North up, east left — the view of the sky"
+        )
 
     def _track_points(self, event: dict) -> list[tuple[float, float]]:
         path = event.get("path") or []
@@ -493,8 +547,14 @@ class DiskView(QWidget):
         disk_radius = approach["target_radius_arcsec"]
         points = self._track_points(self._event)
 
-        # Fit the disk and the whole track, whichever reaches further.
-        extent = max([disk_radius * 1.15] + [math.hypot(x, y) * 1.08 for x, y in points])
+        # Fit whatever reaches furthest: the disk, the track, or a field of
+        # view. A field wider than the disk is the honest picture of what the
+        # camera sees, so it is allowed to pull the view out.
+        extent = max(
+            [disk_radius * 1.15]
+            + [math.hypot(x, y) * 1.08 for x, y in points]
+            + [fov.extent_arcsec() * 1.05 for fov in self._instrument.fields_of_view]
+        )
         margin = 34
         span = min(rect.width(), rect.height()) - 2 * margin
         if span <= 0 or extent <= 0:
@@ -502,9 +562,12 @@ class DiskView(QWidget):
         scale = (span / 2.0) / extent
         cx, cy = rect.center().x(), rect.center().y()
 
+        fx, fy = self._flips
+
         def to_screen(x, y):
-            # East is left and north is up, as when looking at the sky.
-            return QPointF(cx - x * scale, cy - y * scale)
+            # East is left and north is up, as when looking at the sky — until
+            # the flips turn it over to match what the camera shows.
+            return QPointF(cx - fx * x * scale, cy - fy * y * scale)
 
         radius_px = disk_radius * scale
         illumination = self._event.get("illumination")
@@ -517,6 +580,8 @@ class DiskView(QWidget):
         self._disk_clip.addEllipse(QPointF(cx, cy), radius_px, radius_px)
 
         colours = [self._point_colour(x, y, illumination) for x, y in points]
+        # Framing guides go under the event: they are context, not the subject.
+        self._draw_fields_of_view(painter, to_screen, scale)
         # Under the chord, so the chord itself stays the clearest thing drawn.
         self._draw_uncertainty(painter, to_screen, points, scale)
         self._draw_track(painter, to_screen, points, cx, cy, radius_px, colours)
@@ -546,7 +611,10 @@ class DiskView(QWidget):
         # (east, north) maps to screen (-east, -north); the bright limb is at
         # position angle east of north.
         theta = math.radians(illumination["bright_limb_angle_deg"])
-        screen_angle = math.degrees(math.atan2(-math.cos(theta), -math.sin(theta)))
+        fx, fy = self._flips
+        screen_angle = math.degrees(
+            math.atan2(-fy * math.cos(theta), -fx * math.sin(theta))
+        )
 
         painter.save()
         painter.translate(cx, cy)
@@ -586,6 +654,48 @@ class DiskView(QWidget):
         delta = abs((position_angle - illumination["bright_limb_angle_deg"] + 180.0) % 360.0 - 180.0)
         lit_face = delta <= 90.0
         return QColor(self._theme["track"] if lit_face else self._theme["sat_bright"])
+
+    def _draw_fields_of_view(self, painter, to_screen, scale):
+        """Outline what the camera or eyepiece covers, centred on the target.
+
+        Drawn in two passes like the chord — dark over the disk, light against
+        the sky — because one colour disappears against one or the other.
+        """
+        fields = self._instrument.fields_of_view
+        if not fields:
+            return
+
+        for inside in (False, True):
+            painter.save()
+            if inside:
+                painter.setClipPath(self._disk_clip)
+                colour = QColor(self._theme["track"])
+            else:
+                colour = QColor(self._theme["track_outside"])
+            painter.setPen(QPen(colour, 1.2, Qt.PenStyle.DashLine))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+
+            for fov in fields:
+                if fov.is_circle:
+                    radius = fov.diameter_arcmin * 30.0 * scale
+                    centre = to_screen(0.0, 0.0)
+                    painter.drawEllipse(centre, radius, radius)
+                    anchor = QPointF(centre.x(), centre.y() - radius)
+                else:
+                    outline = QPolygonF([to_screen(x, y) for x, y in _fov_corners(fov)])
+                    painter.drawPolygon(outline)
+                    # Centre-top of the field, not a corner: a corner label
+                    # runs off the pane on a wide field.
+                    box = outline.boundingRect()
+                    anchor = QPointF(box.center().x(), box.top())
+
+                # Centred just above the field, in a solid pen: a dashed one
+                # would break up the lettering.
+                width = painter.fontMetrics().horizontalAdvance(fov.name)
+                painter.setPen(QPen(colour, 1.0))
+                painter.drawText(QPointF(anchor.x() - width / 2.0, anchor.y() - 5), fov.name)
+                painter.setPen(QPen(colour, 1.2, Qt.PenStyle.DashLine))
+            painter.restore()
 
     def _draw_uncertainty(self, painter, to_screen, points, scale):
         """A band either side of the chord, for the age of the element set.
@@ -717,12 +827,25 @@ class DiskView(QWidget):
         )
         painter.drawText(10, rect.height() - 8, caption)
 
-        # Compass, bottom right so it stays clear of the captions.
-        ox, oy, arm = rect.width() - 30, rect.height() - 30, 16
-        painter.drawLine(ox, oy, ox, oy - arm)
-        painter.drawLine(ox, oy, ox - arm, oy)
-        painter.drawText(ox - 4, oy - arm - 4, "N")
-        painter.drawText(ox - arm - 14, oy + 4, "E")
+        # Compass, bottom right so it stays clear of the captions. The arms
+        # follow the flips: north is not up once the view is turned over, and a
+        # compass that kept pointing up would be worse than none at all.
+        fx, fy = self._flips
+        arm = 16
+        # An arm points away from the origin, so a flipped axis needs its
+        # origin moved back by an arm's length to stay inside the pane.
+        ox = rect.width() - 30 - (0 if fx > 0 else arm + 8)
+        oy = rect.height() - 30 - (0 if fy > 0 else arm + 8)
+        north = QPointF(ox, oy - fy * arm)
+        east = QPointF(ox - fx * arm, oy)
+        painter.drawLine(QPointF(ox, oy), north)
+        painter.drawLine(QPointF(ox, oy), east)
+        painter.drawText(
+            QPointF(north.x() - 4, north.y() - 5 if fy > 0 else north.y() + 13), "N"
+        )
+        painter.drawText(
+            QPointF(east.x() - 14 if fx > 0 else east.x() + 5, east.y() + 4), "E"
+        )
 
 
 # --- Sky view ----------------------------------------------------------------
@@ -843,15 +966,25 @@ class ViewerWindow(QWidget):
         report: dict | None = None,
         path=None,
         recording_lead_seconds: float = RECORDING_LEAD_SECONDS,
+        instrument: InstrumentConfig | None = None,
+        config_path=None,
     ):
         super().__init__()
         self._theme = theme
+        # Reloaded at each run rather than held, so edits to it take effect
+        # without restarting the viewer.
+        self._config_path = Path(config_path) if config_path else None
         self._recording_lead_seconds = recording_lead_seconds
+        self._instrument = instrument or InstrumentConfig()
         self._report = None
         self._events: list[dict] = []
         self._detail_rows: dict[str, DetailRow] = {}
         self._status_base = "No results loaded."
         self._multiday = False
+        self._pending_output = None
+        self._runner = SearchRunner(self)
+        self._runner.progressed.connect(self._on_progress)
+        self._runner.finished.connect(self._on_computed)
 
         self.setWindowTitle("Solar Transits")
         self.setStyleSheet(stylesheet)
@@ -874,6 +1007,24 @@ class ViewerWindow(QWidget):
         self._title.setObjectName("title")
         header.addWidget(self._title)
         header.addStretch(1)
+        self._compute_btn = QPushButton("Compute…")
+        self._compute_btn.setObjectName("expert")
+        self._compute_menu = QMenu(self._compute_btn)
+        for preset in PRESETS:
+            action = self._compute_menu.addAction(preset.label)
+            action.setToolTip(preset.tooltip)
+            action.triggered.connect(lambda _=False, p=preset: self._start_compute(p))
+        self._compute_btn.clicked.connect(self._on_compute_pressed)
+        if self._config_path is None:
+            self._compute_btn.setEnabled(False)
+            self._compute_btn.setToolTip(
+                "Needs a configuration file — start the viewer with --config"
+            )
+        else:
+            self._compute_btn.setToolTip(
+                f"Run a search with {self._config_path.name} and open the result"
+            )
+        header.addWidget(self._compute_btn)
         self._observe_btn = QPushButton("Observe…")
         self._observe_btn.setObjectName("expert")
         self._observe_btn.setToolTip(
@@ -882,11 +1033,11 @@ class ViewerWindow(QWidget):
         self._observe_btn.clicked.connect(self._on_observe)
         self._observe_btn.setEnabled(False)
         header.addWidget(self._observe_btn)
-        open_btn = QPushButton("Open…")
-        open_btn.setObjectName("expert")
-        open_btn.setToolTip("Open a results file written by python -m sattransit")
-        open_btn.clicked.connect(self._on_open)
-        header.addWidget(open_btn)
+        self._open_btn = QPushButton("Open…")
+        self._open_btn.setObjectName("expert")
+        self._open_btn.setToolTip("Open a results file written by python -m sattransit")
+        self._open_btn.clicked.connect(self._on_open)
+        header.addWidget(self._open_btn)
         root.addLayout(header)
 
         self._status = QLabel("No results loaded.")
@@ -993,7 +1144,7 @@ class ViewerWindow(QWidget):
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setWidget(rows)
 
-        self._disk = DiskView(self._theme)
+        self._disk = DiskView(self._theme, self._instrument)
         self._sky = SkyView(self._theme)
         plots = QSplitter(Qt.Orientation.Horizontal)
         plots.addWidget(self._disk)
@@ -1208,6 +1359,67 @@ class ViewerWindow(QWidget):
         window.show()
         window.raise_()
 
+    # --- running a search ----------------------------------------------------
+
+    def _on_progress(self, text: str):
+        self._status.setText(text)
+
+    def _on_compute_pressed(self):
+        if self._runner.running:
+            self._runner.cancel()
+            return
+        corner = self._compute_btn.rect().bottomLeft()
+        self._compute_menu.exec(self._compute_btn.mapToGlobal(corner))
+
+    def _start_compute(self, preset):
+        if self._config_path is None or self._runner.running:
+            return
+        try:
+            config = load_config(self._config_path)
+        except ConfigError as exc:
+            QMessageBox.warning(self, "Could not read the configuration", str(exc))
+            return
+
+        self._pending_output = config.resolve_output(None)
+        # The observatory's day, not the machine's: the observer is thinking in
+        # the time zone they observe from.
+        now = datetime.now(config.observatory.zoneinfo())
+        self._set_computing(True)
+        # Name the file up front — the run will overwrite it.
+        self._status.setText(f"Starting {preset.label.lower()}… → {self._pending_output}")
+        self._runner.start(preset, self._config_path, now)
+
+    def _set_computing(self, busy: bool):
+        self._compute_btn.setText("Cancel" if busy else "Compute…")
+        self._compute_btn.setToolTip(
+            "Stop the running search"
+            if busy
+            else f"Run a search with {self._config_path.name} and open the result"
+        )
+        # Loading another file mid-run would be replaced the moment it finished.
+        self._open_btn.setEnabled(not busy)
+
+    def _on_computed(self, ok: bool, message: str):
+        self._set_computing(False)
+        if not ok:
+            # A cancellation arrives with no message: the user knows why.
+            if message:
+                QMessageBox.warning(self, "The search failed", message)
+            self._status.setText(self._status_base)
+            return
+        try:
+            report = load_report(self._pending_output)
+        except ReportError as exc:
+            QMessageBox.warning(self, "Could not open the result", str(exc))
+            self._status.setText(self._status_base)
+            return
+        self.set_report(report, self._pending_output)
+
+    def closeEvent(self, event):
+        # Otherwise the search would outlive the window that started it.
+        self._runner.cancel()
+        super().closeEvent(event)
+
     def _on_open(self):
         start_dir = str(Path.cwd())
         name, _ = QFileDialog.getOpenFileName(
@@ -1338,6 +1550,7 @@ def main(argv: list[str] | None = None) -> int:
 
     theme_name = args.theme or "dark"
     lead = RECORDING_LEAD_SECONDS
+    instrument = InstrumentConfig()
     results = Path(args.results) if args.results else None
 
     # A named configuration file must exist; the default is only a convenience,
@@ -1352,6 +1565,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.theme is None:
             theme_name = config.gui.theme
         lead = config.gui.recording_lead_seconds
+        instrument = config.instrument
         if results is None:
             results = config.resolve_output(None)
 
@@ -1370,7 +1584,13 @@ def main(argv: list[str] | None = None) -> int:
     stylesheet = apply_theme(app, theme_name)
 
     window = ViewerWindow(
-        THEMES[theme_name], stylesheet, report, results, recording_lead_seconds=lead
+        THEMES[theme_name],
+        stylesheet,
+        report,
+        results,
+        recording_lead_seconds=lead,
+        instrument=instrument,
+        config_path=config_file if Path(config_file).is_file() else None,
     )
     window.show()
     return app.exec()

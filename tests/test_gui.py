@@ -12,6 +12,8 @@ pytest.importorskip("PyQt6", reason="the GUI is optional")
 from PyQt6.QtCore import Qt  # noqa: E402
 from PyQt6.QtWidgets import QApplication  # noqa: E402
 
+from sattransit.compute import PRESETS  # noqa: E402
+from sattransit.config import FieldOfView, InstrumentConfig  # noqa: E402
 from sattransit.gui import (  # noqa: E402
     COLUMNS,
     THEMES,
@@ -20,12 +22,18 @@ from sattransit.gui import (  # noqa: E402
     SkyView,
     ViewerWindow,
     _detail_values,
+    _fov_corners,
     _local_time,
     _offsets,
     _spans_days,
     apply_theme,
     load_report,
 )
+
+MINIMAL_CONFIG = {
+    "observatory": {"name": "Test", "latitude_deg": 48.0, "longitude_deg": 11.0},
+    "celestrak": {"groups": ["stations"]},
+}
 
 TRANSIT = {
     "event_id": "2026-07-16T14:43:55.699Z_27424",
@@ -855,3 +863,196 @@ def test_the_details_are_blank_without_an_uncertainty_block():
     values = _detail_values(TRANSIT)
     for row in ("Chord band", "Timing", "Outcome"):
         assert values[row] is None
+
+
+# --- the instrument: framing and orientation ---------------------------------
+
+CAMERA = FieldOfView(name="ASI2600MM", width_arcmin=27.5, height_arcmin=18.4)
+FINDER = FieldOfView(name="finder", diameter_arcmin=48.0)
+
+
+def test_the_default_view_is_the_view_of_the_sky(app):
+    view = DiskView(THEMES["dark"])
+    assert view._flips == (1.0, 1.0)
+    assert "north up, east left" in view.toolTip().lower()
+
+
+@pytest.mark.parametrize(
+    "horizontal,vertical,expected",
+    [(False, False, (1.0, 1.0)), (True, False, (-1.0, 1.0)),
+     (False, True, (1.0, -1.0)), (True, True, (-1.0, -1.0))],
+)
+def test_each_flip_turns_its_own_axis_over(app, horizontal, vertical, expected):
+    view = DiskView(THEMES["dark"], InstrumentConfig(horizontal, vertical))
+    assert view._flips == expected
+
+
+def test_a_flipped_view_says_so(app):
+    view = DiskView(THEMES["dark"], InstrumentConfig(flip_horizontal=True))
+    assert "horizontally" in view.toolTip()
+    assert "vertically" not in view.toolTip()
+
+
+def test_the_instrument_can_be_changed_after_construction(app):
+    view = DiskView(THEMES["dark"])
+    view.set_instrument(InstrumentConfig(flip_vertical=True, fields_of_view=[CAMERA]))
+    assert view._flips == (1.0, -1.0)
+    view.set_event(TRANSIT)
+    assert not view.grab().isNull()
+
+
+@pytest.mark.parametrize(
+    "instrument",
+    [
+        InstrumentConfig(fields_of_view=[CAMERA]),
+        InstrumentConfig(fields_of_view=[FINDER]),
+        InstrumentConfig(fields_of_view=[CAMERA, FINDER]),
+        InstrumentConfig(flip_horizontal=True, flip_vertical=True, fields_of_view=[CAMERA]),
+        # A field far larger than the disk, and one far smaller.
+        InstrumentConfig(fields_of_view=[FieldOfView(name="wide", diameter_arcmin=600.0)]),
+        InstrumentConfig(fields_of_view=[FieldOfView(name="tight", diameter_arcmin=0.5)]),
+    ],
+)
+def test_the_disk_view_paints_with_any_field_of_view(app, instrument):
+    view = DiskView(THEMES["dark"], instrument)
+    view.resize(400, 360)
+    view.set_event(TRANSIT)
+    assert not view.grab().isNull()
+
+
+def test_a_moon_event_paints_flipped(app):
+    # The phase is drawn in screen space, so the flips reach further than the
+    # coordinate transform does.
+    view = DiskView(THEMES["dark"], InstrumentConfig(flip_horizontal=True))
+    view.resize(400, 360)
+    view.set_target("moon")
+    view.set_event({**TRANSIT, "illumination": {
+        "phase_deg": 100.0, "illuminated_fraction": 0.3,
+        "bright_limb_angle_deg": 90.0, "limb": "lit", "satellite_sunlit": True}})
+    assert not view.grab().isNull()
+
+
+def test_a_field_of_view_pulls_the_scale_out_to_fit(app):
+    # A field wider than the disk is the honest picture of what the camera
+    # sees, so the disk has to shrink to make room for it.
+    plain = DiskView(THEMES["dark"])
+    wide = DiskView(THEMES["dark"], InstrumentConfig(
+        fields_of_view=[FieldOfView(name="wide", diameter_arcmin=120.0)]))
+    for view in (plain, wide):
+        view.resize(400, 360)
+        view.set_event(TRANSIT)
+    # The wider view draws the same disk over fewer pixels.
+    assert _painted_disk_width(wide) < _painted_disk_width(plain)
+
+
+def _painted_disk_width(view) -> int:
+    """How many pixels across the target's disk is, measured off the render."""
+    image = view.grab().toImage()
+    row = image.height() // 2
+    background = image.pixel(2, 2)
+    return sum(1 for x in range(image.width()) if image.pixel(x, row) != background)
+
+
+# --- the fields' geometry ----------------------------------------------------
+
+
+def test_a_field_at_position_angle_zero_runs_north_and_east():
+    corners = _fov_corners(FieldOfView(name="f", width_arcmin=60.0, height_arcmin=30.0))
+    east = sorted({round(x) for x, _ in corners})
+    north = sorted({round(y) for _, y in corners})
+    assert east == [-1800, 1800]   # 60' wide, so +/- 30' in arcsec
+    assert north == [-900, 900]    # 30' high
+
+
+def test_position_angle_turns_the_field_east_of_north():
+    # At PA 90 the field's height lies along east, so the extents swap.
+    corners = _fov_corners(
+        FieldOfView(name="f", width_arcmin=60.0, height_arcmin=30.0, position_angle_deg=90.0)
+    )
+    assert sorted({round(x) for x, _ in corners}) == [-900, 900]
+    assert sorted({round(y) for _, y in corners}) == [-1800, 1800]
+
+
+def test_a_field_keeps_its_size_whatever_the_position_angle():
+    import math
+
+    for angle in (0.0, 17.0, 45.0, 123.0):
+        corners = _fov_corners(
+            FieldOfView(name="f", width_arcmin=20.0, height_arcmin=10.0, position_angle_deg=angle)
+        )
+        side = math.dist(corners[0], corners[1])
+        assert side == pytest.approx(20.0 * 60.0)  # the width, in arcsec
+
+
+# --- computing from the viewer -----------------------------------------------
+
+
+def test_the_compute_button_is_disabled_without_a_configuration(app):
+    # Nothing to run: say why rather than failing when it is pressed.
+    window = ViewerWindow(THEMES["dark"], apply_theme(app, "dark"), REPORT, None)
+    assert not window._compute_btn.isEnabled()
+    assert "configuration" in window._compute_btn.toolTip()
+
+
+def test_the_menu_offers_every_preset(app, tmp_path):
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps(MINIMAL_CONFIG))
+    window = ViewerWindow(
+        THEMES["dark"], apply_theme(app, "dark"), REPORT, None, config_path=config
+    )
+    assert window._compute_btn.isEnabled()
+    assert [a.text() for a in window._compute_menu.actions()] == [p.label for p in PRESETS]
+
+
+def test_a_running_search_turns_the_button_into_cancel(app, tmp_path):
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps(MINIMAL_CONFIG))
+    window = ViewerWindow(
+        THEMES["dark"], apply_theme(app, "dark"), REPORT, None, config_path=config
+    )
+    window._set_computing(True)
+    assert window._compute_btn.text() == "Cancel"
+    # Opening another file mid-run would be replaced the moment it finished.
+    assert not window._open_btn.isEnabled()
+    window._set_computing(False)
+    assert window._compute_btn.text() == "Compute…"
+    assert window._open_btn.isEnabled()
+
+
+def test_a_bad_configuration_is_reported_rather_than_run(app, tmp_path, monkeypatch):
+    config = tmp_path / "config.json"
+    config.write_text("{not json")
+    window = ViewerWindow(
+        THEMES["dark"], apply_theme(app, "dark"), REPORT, None, config_path=config
+    )
+    shown = []
+    monkeypatch.setattr(
+        "sattransit.gui.QMessageBox.warning", lambda *args, **kw: shown.append(args[1])
+    )
+    window._start_compute(PRESETS[0])
+    assert shown and "configuration" in shown[0].lower()
+    assert not window._runner.running
+
+
+def test_a_cancelled_search_reports_nothing_and_restores_the_status(app, tmp_path):
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps(MINIMAL_CONFIG))
+    window = ViewerWindow(
+        THEMES["dark"], apply_theme(app, "dark"), REPORT, None, config_path=config
+    )
+    window._set_computing(True)
+    window._on_computed(False, "")  # how a cancellation arrives: no message
+    assert window._compute_btn.text() == "Compute…"
+    assert window._status.text() == window._status_base
+
+
+def test_closing_the_window_stops_a_running_search(app, tmp_path):
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps(MINIMAL_CONFIG))
+    window = ViewerWindow(
+        THEMES["dark"], apply_theme(app, "dark"), REPORT, None, config_path=config
+    )
+    stopped = []
+    window._runner.cancel = lambda: stopped.append(True)
+    window.close()
+    assert stopped, "a search must not outlive the window that started it"

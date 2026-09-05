@@ -259,8 +259,9 @@ the centre and horizon at the rim, so the run of dots also traces the Sun's path
 through the window. Gold marks a disk transit, grey a near miss, and the
 selected event is ringed.
 
-Both use the usual view of the sky: north up, east left. The figures for the
-selected event are below; every panel divider can be dragged.
+Both use the usual view of the sky: north up, east left — unless the disk view
+is flipped to match a camera, see *Matching the telescope* below. The figures
+for the selected event are below; every panel divider can be dragged.
 
 Filters sit above the list: upper limits on range and on the distance from the
 Sun's centre, and lower limits on altitude and on apparent size. Setting the
@@ -311,6 +312,62 @@ It uses the same PyQt6 framework and theme as the TURM Control GUI. The theme
 follows `gui.theme` in the config file (`dark` or `light`); `--theme` overrides
 it for one run.
 
+### Computing from the viewer
+
+`Compute…` runs a search without leaving the window. It offers three windows,
+each starting at midnight in the observatory's timezone:
+
+| | Window | Searches |
+| --- | --- | --- |
+| **Today** | the calendar day | every configured group |
+| **Today and tomorrow** | two days | every configured group |
+| **Week ahead — favourites** | seven days | the favourites only |
+
+"Today" is the calendar day rather than the next 24 hours, so a plan made at
+noon still shows the morning. The long window is offered only for the
+favourites because a week over the whole catalogue would run for hours.
+
+The search runs as a separate `python -m sattransit` process, so the window
+stays responsive, `Cancel` stops it at once, and a crash in the engine cannot
+take the viewer with it. Progress appears in the status line; the result is
+written to `output.file` — which the status line names before the run starts,
+since that file is about to be overwritten — and opened when it finishes. The
+configuration is re-read at each run, so edits to it take effect without
+restarting the viewer.
+
+The button needs a configuration file: with none it is disabled and says so.
+
+### Matching the telescope
+
+The `instrument` section describes what the telescope actually shows, so the
+disk view can be compared with the camera directly rather than in your head.
+
+```json
+"instrument": {
+  "flip_horizontal": true,
+  "flip_vertical": false,
+  "fields_of_view": [
+    {"name": "ASI2600MM @ 2350mm", "width_arcmin": 34.6, "height_arcmin": 23.1},
+    {"name": "finder", "diameter_arcmin": 90.0}
+  ]
+}
+```
+
+**The flips** turn the disk view over. A star diagonal — or any odd number of
+mirrors — mirrors the image, and comparing a mirrored camera view against an
+unmirrored chart is a good way to lose a one-second transit. The compass in the
+corner follows the flips, so it always says which way round the view is, and
+the view's tooltip says it in words.
+
+**The fields of view** are drawn over the disk as dashed outlines, centred on
+the target, each labelled. Give either `width_arcmin` with `height_arcmin` for a
+camera, or `diameter_arcmin` for a circular field; `position_angle_deg` turns a
+rectangle east of north, the same angle a rotator reports. A field wider than
+the disk pulls the view out to fit — that is the honest picture of what the
+camera sees, and it makes plain when a transit will fall outside the frame.
+
+Both are display only: they change nothing in the search or the results file.
+
 ## Configuration
 
 See `config.example.json`. Only `observatory` and `celestrak` are required;
@@ -345,6 +402,8 @@ everything else has defaults.
 | `sizes.url`, `sizes.max_age_days` | Where the size catalogue comes from, and when to refresh it |
 | `favorites.file` | List used by `--favorites` when no file is given |
 | `output.file`, `output.indent`, `output.include_path` | Output file, JSON indentation, whether to emit `path` |
+| `instrument.flip_horizontal`, `instrument.flip_vertical` | Turn the disk view over to match a mirrored camera. See *Matching the telescope* |
+| `instrument.fields_of_view` | Framing guides drawn over the disk: `name` with `width_arcmin`/`height_arcmin` or `diameter_arcmin`, and optional `position_angle_deg` |
 | `gui.theme` | Viewer theme: `dark` (default) or `light` |
 | `gui.recording_lead_seconds` | How far before mid-transit the observing window says to start recording (default 5) |
 

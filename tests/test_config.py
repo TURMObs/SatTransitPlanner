@@ -162,3 +162,95 @@ def test_a_non_positive_recording_lead_is_rejected(tmp_path, bad):
     data = {**MINIMAL, "gui": {"recording_lead_seconds": bad}}
     with pytest.raises(ConfigError, match="recording_lead_seconds"):
         load_config(write(tmp_path, data))
+
+
+# --- the instrument ----------------------------------------------------------
+
+
+def test_no_instrument_section_means_no_flips_and_no_fields(tmp_path):
+    config = load_config(write(tmp_path, MINIMAL))
+    assert config.instrument.flip_horizontal is False
+    assert config.instrument.flip_vertical is False
+    assert config.instrument.fields_of_view == []
+
+
+def test_a_rectangular_field_is_read(tmp_path):
+    raw = {
+        **MINIMAL,
+        "instrument": {
+            "flip_horizontal": True,
+            "fields_of_view": [
+                {"name": "ASI2600MM", "width_arcmin": 27.5, "height_arcmin": 18.4}
+            ],
+        },
+    }
+    instrument = load_config(write(tmp_path, raw)).instrument
+    assert instrument.flip_horizontal is True
+    field = instrument.fields_of_view[0]
+    assert field.name == "ASI2600MM"
+    assert field.is_circle is False
+    assert field.position_angle_deg == 0.0
+
+
+def test_a_circular_field_is_read(tmp_path):
+    raw = {**MINIMAL, "instrument": {"fields_of_view": [{"name": "f", "diameter_arcmin": 60.0}]}}
+    field = load_config(write(tmp_path, raw)).instrument.fields_of_view[0]
+    assert field.is_circle
+    # Half of 60' in arcseconds: how far it reaches from the centre.
+    assert field.extent_arcsec() == pytest.approx(1800.0)
+
+
+def test_a_rectangle_reaches_to_its_corner():
+    from sattransit.config import FieldOfView
+
+    field = FieldOfView(name="f", width_arcmin=8.0, height_arcmin=6.0)
+    assert field.extent_arcsec() == pytest.approx(300.0)  # hypot(8,6)/2 = 5' = 300"
+
+
+@pytest.mark.parametrize(
+    "field,expected",
+    [
+        ({"name": "f"}, "needs width_arcmin"),
+        ({"name": "f", "width_arcmin": 10.0}, "needs width_arcmin"),
+        ({"name": "f", "width_arcmin": 10.0, "diameter_arcmin": 5.0}, "either"),
+        ({"name": "f", "diameter_arcmin": 0.0}, "must be positive"),
+        ({"name": " ", "diameter_arcmin": 5.0}, "non-empty"),
+        ({"name": "f", "width_arcmin": -1.0, "height_arcmin": 2.0}, "must be positive"),
+    ],
+)
+def test_a_field_that_describes_nothing_is_rejected(tmp_path, field, expected):
+    raw = {**MINIMAL, "instrument": {"fields_of_view": [field]}}
+    with pytest.raises(ConfigError, match=expected):
+        load_config(write(tmp_path, raw))
+
+
+def test_a_field_without_a_name_is_rejected(tmp_path):
+    raw = {**MINIMAL, "instrument": {"fields_of_view": [{"diameter_arcmin": 30.0}]}}
+    with pytest.raises(ConfigError, match="name"):
+        load_config(write(tmp_path, raw))
+
+
+def test_the_offending_field_is_identified_by_position(tmp_path):
+    raw = {
+        **MINIMAL,
+        "instrument": {
+            "fields_of_view": [
+                {"name": "ok", "diameter_arcmin": 30.0},
+                {"name": "bad", "diameter_arcmin": -1.0},
+            ]
+        },
+    }
+    with pytest.raises(ConfigError, match=r"fields_of_view\[1\]"):
+        load_config(write(tmp_path, raw))
+
+
+def test_fields_of_view_must_be_a_list(tmp_path):
+    raw = {**MINIMAL, "instrument": {"fields_of_view": {"name": "f"}}}
+    with pytest.raises(ConfigError, match="expected a list"):
+        load_config(write(tmp_path, raw))
+
+
+def test_an_unknown_instrument_option_is_rejected(tmp_path):
+    raw = {**MINIMAL, "instrument": {"flip_diagonal": True}}
+    with pytest.raises(ConfigError, match="flip_diagonal"):
+        load_config(write(tmp_path, raw))

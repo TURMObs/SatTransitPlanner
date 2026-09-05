@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -129,6 +130,46 @@ class FavoritesConfig:
 
 
 @dataclass
+class FieldOfView:
+    """One camera or eyepiece field, drawn over the disk as a framing guide.
+
+    Either a rectangle (``width_arcmin`` with ``height_arcmin``) or a circle
+    (``diameter_arcmin``). ``position_angle_deg`` turns the rectangle east of
+    north, the convention a camera rotator already uses.
+    """
+
+    name: str
+    width_arcmin: float | None = None
+    height_arcmin: float | None = None
+    diameter_arcmin: float | None = None
+    position_angle_deg: float = 0.0
+
+    @property
+    def is_circle(self) -> bool:
+        return self.diameter_arcmin is not None
+
+    def extent_arcsec(self) -> float:
+        """How far the field reaches from its centre, in arcseconds."""
+        if self.is_circle:
+            return self.diameter_arcmin * 30.0  # half of it, in arcsec
+        return math.hypot(self.width_arcmin, self.height_arcmin) * 30.0
+
+
+@dataclass
+class InstrumentConfig:
+    """What the telescope shows: which way round, and how much of the sky.
+
+    A star diagonal — or any odd number of mirrors — turns the image over. The
+    flips put the disk view the same way round as the camera, so what is on the
+    screen matches what is on the chip.
+    """
+
+    flip_horizontal: bool = False
+    flip_vertical: bool = False
+    fields_of_view: list[FieldOfView] = field(default_factory=list)
+
+
+@dataclass
 class GuiConfig:
     theme: str = "dark"
     # How long before mid-transit the observing window says to start recording.
@@ -148,6 +189,7 @@ class Config:
     spacetrack: SpaceTrackConfig = field(default_factory=SpaceTrackConfig)
     favorites: FavoritesConfig = field(default_factory=FavoritesConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
+    instrument: InstrumentConfig = field(default_factory=InstrumentConfig)
     gui: GuiConfig = field(default_factory=GuiConfig)
     cache_dir: str = "cache"
     ephemeris: str = "de421.bsp"
@@ -200,6 +242,30 @@ def _build(cls: type, data: Any, section: str):
     return cls(**data)
 
 
+def _build_instrument(data: Any, section: str) -> InstrumentConfig:
+    """Like ``_build``, but the fields of view are a list of nested objects."""
+    if not isinstance(data, dict):
+        raise ConfigError(f"{section}: expected an object, got {type(data).__name__}")
+
+    raw_fields = data.get("fields_of_view", [])
+    if not isinstance(raw_fields, list):
+        raise ConfigError(
+            f"{section}.fields_of_view: expected a list of fields, "
+            f"got {type(raw_fields).__name__}"
+        )
+
+    instrument = _build(
+        InstrumentConfig,
+        {key: value for key, value in data.items() if key != "fields_of_view"},
+        section,
+    )
+    instrument.fields_of_view = [
+        _build(FieldOfView, entry, f"{section}.fields_of_view[{index}]")
+        for index, entry in enumerate(raw_fields)
+    ]
+    return instrument
+
+
 def load_config(path: str | Path) -> Config:
     path = Path(path).expanduser().resolve()
     if not path.is_file():
@@ -218,7 +284,8 @@ def load_config(path: str | Path) -> Config:
 
     known_top = {
         "observatory", "celestrak", "target", "search", "illumination", "uncertainty",
-        "sizes", "spacetrack", "favorites", "output", "gui", "cache_dir", "ephemeris",
+        "sizes", "spacetrack", "favorites", "output", "instrument", "gui",
+        "cache_dir", "ephemeris",
     }
     unknown = set(raw) - known_top
     if unknown:
@@ -242,6 +309,7 @@ def load_config(path: str | Path) -> Config:
         spacetrack=_build(SpaceTrackConfig, raw.get("spacetrack", {}), "spacetrack"),
         favorites=_build(FavoritesConfig, raw.get("favorites", {}), "favorites"),
         output=_build(OutputConfig, raw.get("output", {}), "output"),
+        instrument=_build_instrument(raw.get("instrument", {}), "instrument"),
         gui=_build(GuiConfig, raw.get("gui", {}), "gui"),
         cache_dir=raw.get("cache_dir", "cache"),
         ephemeris=raw.get("ephemeris", "de421.bsp"),
@@ -311,6 +379,25 @@ def _validate(config: Config) -> None:
         raise ConfigError("uncertainty.cross_track_km_per_day: must not be negative")
     if config.uncertainty.along_track_km_per_day < 0:
         raise ConfigError("uncertainty.along_track_km_per_day: must not be negative")
+
+    for index, fov in enumerate(config.instrument.fields_of_view):
+        where = f"instrument.fields_of_view[{index}]"
+        if not isinstance(fov.name, str) or not fov.name.strip():
+            raise ConfigError(f"{where}.name: must be a non-empty string")
+        sided = fov.width_arcmin is not None or fov.height_arcmin is not None
+        if sided and fov.is_circle:
+            raise ConfigError(
+                f"{where}: give either width_arcmin and height_arcmin, or diameter_arcmin"
+            )
+        if fov.is_circle:
+            if fov.diameter_arcmin <= 0:
+                raise ConfigError(f"{where}.diameter_arcmin: must be positive")
+        elif fov.width_arcmin is None or fov.height_arcmin is None:
+            raise ConfigError(
+                f"{where}: needs width_arcmin with height_arcmin, or diameter_arcmin"
+            )
+        elif fov.width_arcmin <= 0 or fov.height_arcmin <= 0:
+            raise ConfigError(f"{where}: width_arcmin and height_arcmin must be positive")
 
     if config.gui.theme not in ("dark", "light"):
         raise ConfigError(f"gui.theme: must be 'dark' or 'light', not {config.gui.theme!r}")
