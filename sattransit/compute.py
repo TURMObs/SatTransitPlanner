@@ -19,6 +19,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+# The bodies a satellite can be caught in front of.
+TARGETS = ("sun", "moon")
+
 try:
     from PyQt6.QtCore import QObject, QProcess, pyqtSignal
 except ImportError:  # pragma: no cover - the presets stay usable without Qt
@@ -29,27 +32,53 @@ except ImportError:  # pragma: no cover - the presets stay usable without Qt
 
 @dataclass(frozen=True)
 class Preset:
-    """One of the windows the viewer offers to search."""
+    """One of the searches the viewer offers: a window over a target."""
 
     key: str
     label: str
     days: int
+    target: str = "sun"
     favorites: bool = False
 
     @property
+    def title(self) -> str:
+        """Names the target too, for a status line read out of context."""
+        return f"{self.target.capitalize()}: {self.label.lower()}"
+
+    @property
     def tooltip(self) -> str:
-        nights = "day" if self.days == 1 else f"{self.days} days"
+        span = "one day" if self.days == 1 else f"{self.days} days"
         who = "the favourites" if self.favorites else "every configured group"
-        return f"Search {nights} from midnight for {who}"
+        return f"Search {span} from midnight for {who}, transiting the {self.target.capitalize()}"
 
 
 # A day's search over the full catalogue takes minutes, so the long window is
 # offered only for the favourites, where it is a few satellites and quick.
-PRESETS = (
-    Preset("today", "Today", 1),
-    Preset("two-days", "Today and tomorrow", 2),
-    Preset("week-favorites", "Week ahead — favourites", 7, favorites=True),
+_WINDOWS = (
+    ("today", "Today", 1, False),
+    ("two-days", "Today and tomorrow", 2, False),
+    ("week-favorites", "Week ahead — favourites", 7, True),
 )
+
+# Grouped by target, which is how the menu presents them.
+PRESETS = tuple(
+    Preset(f"{target}-{key}", label, days, target, favorites)
+    for target in TARGETS
+    for key, label, days, favorites in _WINDOWS
+)
+
+
+def output_path(config, preset: Preset) -> Path:
+    """Where this preset writes its results.
+
+    The configured output file belongs to the configured target; a search of
+    the other one gets a sibling beside it. Otherwise a lunar run would quietly
+    overwrite the solar plan, which is the sort of thing you find out at dusk.
+    """
+    path = config.resolve_output(None)
+    if preset.target == config.target:
+        return path
+    return path.with_name(f"{path.stem}-{preset.target}{path.suffix}")
 
 
 def window_start(now: datetime) -> datetime:
@@ -66,11 +95,14 @@ def command(
     config_path: Path | str,
     now: datetime,
     python: str | None = None,
+    output: Path | str | None = None,
 ) -> list[str]:
     """The command line that runs this preset's search.
 
     The start is written without an offset so the CLI reads it in the
     observatory's own timezone, which is the one the observer is thinking in.
+    The target and the output file are always named rather than left to the
+    configuration, so what the menu says is what runs.
     """
     start = window_start(now)
     argv = [
@@ -83,7 +115,11 @@ def command(
         start.strftime("%Y-%m-%dT%H:%M:%S"),
         "--duration",
         f"{preset.days}d",
+        "--target",
+        preset.target,
     ]
+    if output is not None:
+        argv += ["--output", str(output)]
     if preset.favorites:
         argv.append("--favorites")
     return argv
@@ -151,11 +187,12 @@ class SearchRunner(QObject):
         config_path: Path | str,
         now: datetime,
         python: str | None = None,
+        output: Path | str | None = None,
     ) -> None:
         if self.running:
             raise RuntimeError("a search is already running")
 
-        argv = command(preset, config_path, now, python)
+        argv = command(preset, config_path, now, python, output)
         self._stderr = ""
         self._cancelled = False
         self._process = QProcess(self)

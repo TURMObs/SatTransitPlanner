@@ -61,7 +61,7 @@ from . import __version__
 from .config import DEFAULT_CONFIG_FILE, ConfigError, InstrumentConfig, load_config
 from .mount import describe as describe_hour_angle
 from .mount import hour_angle_deg, is_turned_over, meridian_side
-from .compute import PRESETS, SearchRunner
+from .compute import PRESETS, SearchRunner, output_path
 from .observe import RECORDING_LEAD_SECONDS
 
 # --- Themes ------------------------------------------------------------------
@@ -1065,7 +1065,13 @@ class ViewerWindow(QWidget):
         self._compute_btn = QPushButton("Compute…")
         self._compute_btn.setObjectName("expert")
         self._compute_menu = QMenu(self._compute_btn)
+        # Grouped by target under a heading, so the same three windows can keep
+        # their own short names instead of repeating "Sun"/"Moon" six times.
+        target = None
         for preset in PRESETS:
+            if preset.target != target:
+                target = preset.target
+                self._compute_menu.addSection(target.capitalize())
             action = self._compute_menu.addAction(preset.label)
             action.setToolTip(preset.tooltip)
             action.triggered.connect(lambda _=False, p=preset: self._start_compute(p))
@@ -1440,14 +1446,15 @@ class ViewerWindow(QWidget):
             QMessageBox.warning(self, "Could not read the configuration", str(exc))
             return
 
-        self._pending_output = config.resolve_output(None)
+        # A lunar run writes beside the solar plan rather than over it.
+        self._pending_output = output_path(config, preset)
         # The observatory's day, not the machine's: the observer is thinking in
         # the time zone they observe from.
         now = datetime.now(config.observatory.zoneinfo())
         self._set_computing(True)
         # Name the file up front — the run will overwrite it.
-        self._status.setText(f"Starting {preset.label.lower()}… → {self._pending_output}")
-        self._runner.start(preset, self._config_path, now)
+        self._status.setText(f"Starting {preset.title}… → {self._pending_output}")
+        self._runner.start(preset, self._config_path, now, output=self._pending_output)
 
     def _set_computing(self, busy: bool):
         self._compute_btn.setText("Cancel" if busy else "Compute…")

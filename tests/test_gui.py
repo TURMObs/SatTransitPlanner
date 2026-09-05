@@ -1001,7 +1001,10 @@ def test_the_menu_offers_every_preset(app, tmp_path):
         THEMES["dark"], apply_theme(app, "dark"), REPORT, None, config_path=config
     )
     assert window._compute_btn.isEnabled()
-    assert [a.text() for a in window._compute_menu.actions()] == [p.label for p in PRESETS]
+    actions = window._compute_menu.actions()
+    assert [a.text() for a in actions if not a.isSeparator()] == [p.label for p in PRESETS]
+    # Each target gets a heading of its own above its windows.
+    assert [a.text() for a in actions if a.isSeparator()] == ["Sun", "Moon"]
 
 
 def test_a_running_search_turns_the_button_into_cancel(app, tmp_path):

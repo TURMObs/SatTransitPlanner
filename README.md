@@ -320,7 +320,8 @@ it for one run.
 ### Computing from the viewer
 
 `Compute…` runs a search without leaving the window. It offers three windows,
-each starting at midnight in the observatory's timezone:
+under a heading for each target — **Sun** and **Moon** — each starting at
+midnight in the observatory's timezone:
 
 | | Window | Searches |
 | --- | --- | --- |
@@ -332,11 +333,19 @@ each starting at midnight in the observatory's timezone:
 noon still shows the morning. The long window is offered only for the
 favourites because a week over the whole catalogue would run for hours.
 
+Each run names its own target, so the menu overrides `target` in the
+configuration rather than depending on it. The configured `output.file` belongs
+to the configured target, and the other one is written beside it — with
+`target: "sun"` and `output.file: "transits.json"`, a lunar run writes
+`transits-moon.json`. Otherwise an evening's lunar search would quietly
+overwrite the solar plan. Opening either file switches the disk view to the
+right body on its own.
+
 The search runs as a separate `python -m sattransit` process, so the window
 stays responsive, `Cancel` stops it at once, and a crash in the engine cannot
 take the viewer with it. Progress appears in the status line; the result is
-written to `output.file` — which the status line names before the run starts,
-since that file is about to be overwritten — and opened when it finishes. The
+written to the file named above — which the status line spells out before the
+run starts, since it is about to be overwritten — and opened when it finishes. The
 configuration is re-read at each run, so edits to it take effect without
 restarting the viewer.
 

@@ -8,13 +8,16 @@ import io
 import sys
 from contextlib import redirect_stderr
 from datetime import datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
 
 from sattransit.compute import (
     PRESETS,
+    TARGETS,
     command,
+    output_path,
     error_text,
     parse_progress,
     progress_text,
@@ -53,13 +56,28 @@ def test_the_window_keeps_the_observatory_timezone():
     assert window_start(AFTERNOON).tzinfo is BERLIN
 
 
-def test_every_preset_has_a_distinct_key_and_label():
+def test_every_preset_has_a_distinct_key():
     assert len({p.key for p in PRESETS}) == len(PRESETS)
-    assert len({p.label for p in PRESETS}) == len(PRESETS)
 
 
-def test_the_presets_cover_a_day_two_days_and_a_week():
-    assert sorted(p.days for p in PRESETS) == [1, 2, 7]
+def test_the_labels_repeat_across_targets_but_the_titles_do_not():
+    # The menu groups them under a heading, so the same three windows can keep
+    # their short names; the title is what a status line has to stand on.
+    assert len({p.label for p in PRESETS}) == 3
+    assert len({p.title for p in PRESETS}) == len(PRESETS)
+
+
+def test_both_targets_get_the_same_three_windows():
+    for target in TARGETS:
+        windows = [p for p in PRESETS if p.target == target]
+        assert sorted(w.days for w in windows) == [1, 2, 7]
+
+
+def test_the_presets_are_grouped_by_target():
+    # The menu adds a heading whenever the target changes, so a target that
+    # appeared twice would get two headings.
+    targets = [p.target for p in PRESETS]
+    assert targets == sorted(targets, key=TARGETS.index)
 
 
 def test_only_the_long_window_is_limited_to_favourites():
@@ -95,6 +113,22 @@ def test_every_preset_asks_for_its_own_duration(preset):
 @pytest.mark.parametrize("preset", PRESETS)
 def test_favourites_are_requested_only_where_the_preset_says_so(preset):
     assert ("--favorites" in command(preset, "site.json", AFTERNOON)) == preset.favorites
+
+
+@pytest.mark.parametrize("preset", PRESETS)
+def test_the_command_always_names_its_target(preset):
+    # Never left to the configuration: what the menu says is what runs.
+    argv = command(preset, "site.json", AFTERNOON)
+    assert argv[argv.index("--target") + 1] == preset.target
+
+
+def test_the_command_names_its_output_file_when_given_one():
+    argv = command(PRESETS[0], "site.json", AFTERNOON, output="/tmp/plan.json")
+    assert argv[argv.index("--output") + 1] == "/tmp/plan.json"
+
+
+def test_the_command_leaves_the_output_to_the_configuration_when_not():
+    assert "--output" not in command(PRESETS[0], "site.json", AFTERNOON)
 
 
 def test_the_command_defaults_to_the_running_interpreter():
@@ -211,3 +245,52 @@ def test_two_searches_at_once_are_refused(qt_app):
             runner.start(PRESETS[0], "site.json", AFTERNOON)
     finally:
         runner.cancel()
+
+
+# --- where the results go ----------------------------------------------------
+
+
+class _Config:
+    """Just enough of a Config for output_path."""
+
+    def __init__(self, target, path):
+        self.target = target
+        self._path = Path(path)
+
+    def resolve_output(self, _override):
+        return self._path
+
+
+def test_the_configured_target_writes_to_the_configured_file():
+    config = _Config("sun", "/plans/transits.json")
+    sun = next(p for p in PRESETS if p.target == "sun")
+    assert output_path(config, sun) == Path("/plans/transits.json")
+
+
+def test_the_other_target_writes_beside_it():
+    # Otherwise a lunar run would quietly overwrite the solar plan.
+    config = _Config("sun", "/plans/transits.json")
+    moon = next(p for p in PRESETS if p.target == "moon")
+    assert output_path(config, moon) == Path("/plans/transits-moon.json")
+
+
+def test_the_naming_follows_whichever_target_is_configured():
+    # With the Moon configured it is the solar run that gets the sibling.
+    config = _Config("moon", "/plans/transits.json")
+    by_target = {p.target: output_path(config, p) for p in PRESETS}
+    assert by_target["moon"] == Path("/plans/transits.json")
+    assert by_target["sun"] == Path("/plans/transits-sun.json")
+
+
+def test_the_sibling_keeps_the_suffix_and_the_directory():
+    config = _Config("sun", "/plans/nightly/plan.result.json")
+    moon = next(p for p in PRESETS if p.target == "moon")
+    written = output_path(config, moon)
+    assert written.parent == Path("/plans/nightly")
+    assert written.name == "plan.result-moon.json"
+
+
+def test_no_two_presets_of_different_targets_share_a_file():
+    config = _Config("sun", "/plans/transits.json")
+    paths = {p.target: output_path(config, p) for p in PRESETS}
+    assert len(set(paths.values())) == len(TARGETS)
