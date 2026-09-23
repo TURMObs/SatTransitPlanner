@@ -134,32 +134,45 @@ RADIUS = 960.0  # a round solar radius, in arcseconds
 
 def test_a_centred_track_is_one_radius_above_the_low_limb():
     offset = pointing_offset(0.0, 0.0, RADIUS, 0.0, north_is_down=False)
-    assert offset == (pytest.approx(0.0), pytest.approx(RADIUS / 3600.0))
+    assert offset.ra_hours == pytest.approx(0.0)
+    assert offset.dec_deg == pytest.approx(RADIUS / 3600.0)
 
 
 def test_turning_the_view_over_moves_the_reference_to_the_other_limb():
     # The lowest thing on screen is now the north edge, so the slew is southwards.
-    _, delta_dec = pointing_offset(0.0, 0.0, RADIUS, 0.0, north_is_down=True)
-    assert delta_dec == pytest.approx(-RADIUS / 3600.0)
+    offset = pointing_offset(0.0, 0.0, RADIUS, 0.0, north_is_down=True)
+    assert offset.dec_deg == pytest.approx(-RADIUS / 3600.0)
 
 
 def test_a_track_across_the_top_of_the_disk_is_two_radii_up():
     # Position angle 0 is due north, so this grazes the far limb.
-    _, delta_dec = pointing_offset(RADIUS, 0.0, RADIUS, 0.0, north_is_down=False)
-    assert delta_dec == pytest.approx(2 * RADIUS / 3600.0)
+    offset = pointing_offset(RADIUS, 0.0, RADIUS, 0.0, north_is_down=False)
+    assert offset.dec_deg == pytest.approx(2 * RADIUS / 3600.0)
 
 
 def test_the_east_west_offset_does_not_care_which_way_up_the_view_is():
     # The lowest point of a disk is directly below its centre either way.
     up = pointing_offset(500.0, 90.0, RADIUS, 20.0, north_is_down=False)
     down = pointing_offset(500.0, 90.0, RADIUS, 20.0, north_is_down=True)
-    assert up[0] == pytest.approx(down[0])
+    assert up.ra_hours == pytest.approx(down.ra_hours)
 
 
 def test_position_angle_ninety_is_due_east():
-    delta_ra, delta_dec = pointing_offset(600.0, 90.0, RADIUS, 0.0, north_is_down=False)
-    assert delta_ra > 0  # east is increasing right ascension
-    assert delta_dec == pytest.approx(RADIUS / 3600.0)  # no north-south component
+    offset = pointing_offset(600.0, 90.0, RADIUS, 0.0, north_is_down=False)
+    assert offset.ra_hours > 0  # east is increasing right ascension
+    assert offset.dec_deg == pytest.approx(RADIUS / 3600.0)  # no north-south part
+
+
+def test_right_ascension_comes_back_in_hours():
+    """Fifteen degrees of right ascension is one hour of it.
+
+    The pair carries two different units, which is exactly why the fields are
+    named rather than returned as a bare tuple.
+    """
+    offset = pointing_offset(600.0, 90.0, RADIUS, 0.0, north_is_down=False)
+    # 600" due east at declination zero is 40 seconds of right ascension.
+    assert offset.ra_hours * 3600.0 == pytest.approx(40.0)
+    assert offset.ra_hours == pytest.approx((600.0 / 3600.0) / 15.0)
 
 
 def test_the_ra_offset_carries_the_cosine_of_the_declination():
@@ -170,10 +183,10 @@ def test_the_ra_offset_carries_the_cosine_of_the_declination():
     """
     import math
 
-    on_sky = 600.0 / 3600.0
+    on_sky_hours = (600.0 / 3600.0) / 15.0
     for dec in (0.0, 23.4, -23.4):
-        delta_ra, _ = pointing_offset(600.0, 90.0, RADIUS, dec, north_is_down=False)
-        assert delta_ra == pytest.approx(on_sky / math.cos(math.radians(dec)))
+        offset = pointing_offset(600.0, 90.0, RADIUS, dec, north_is_down=False)
+        assert offset.ra_hours == pytest.approx(on_sky_hours / math.cos(math.radians(dec)))
 
 
 def test_near_the_pole_there_is_no_answer_to_give():

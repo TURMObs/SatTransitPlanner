@@ -17,6 +17,7 @@ in the same place to within a degree.
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 
 SIDES = ("any", "east", "west")
 
@@ -58,15 +59,28 @@ def declination_deg(altitude_deg: float, azimuth_deg: float, latitude_deg: float
     return math.degrees(math.asin(max(-1.0, min(1.0, sine))))
 
 
+@dataclass(frozen=True)
+class Offset:
+    """Where to move, from one point on the sky to another.
+
+    Right ascension in hours and declination in degrees — the units each is
+    conventionally written in. Named rather than returned as a bare pair,
+    because a tuple of two different units is asking to be read the wrong way
+    round.
+    """
+
+    ra_hours: float
+    dec_deg: float
+
+
 def pointing_offset(
     separation_arcsec: float,
     position_angle_deg: float,
     radius_arcsec: float,
     dec_deg: float,
     north_is_down: bool,
-) -> tuple[float, float] | None:
-    """Offset in RA and Dec, in degrees, from the disk's lowest drawn point to
-    the track's mid-point.
+) -> Offset | None:
+    """Offset from the disk's lowest drawn point to the track's mid-point.
 
     At a long focal length the disk does not fit in the frame, so the limb is
     the only landmark there is to start from: put the bottom edge of the disk
@@ -77,7 +91,7 @@ def pointing_offset(
 
     The RA offset is a difference in right ascension, not an angle on the sky:
     it carries the 1/cos(dec) factor already, so it can be added straight to a
-    right ascension.
+    right ascension, in the hours such a coordinate is written in.
     """
     if abs(dec_deg) > 89.9:  # cos(dec) vanishes and RA stops meaning anything
         return None
@@ -91,8 +105,9 @@ def pointing_offset(
     low_limb_north = radius_arcsec if north_is_down else -radius_arcsec
 
     delta_dec = (north - low_limb_north) / 3600.0
+    # Degrees of RA first, then hours: 15 degrees of right ascension is an hour.
     delta_ra = east / 3600.0 / math.cos(math.radians(dec_deg))
-    return delta_ra, delta_dec
+    return Offset(ra_hours=delta_ra / 15.0, dec_deg=delta_dec)
 
 
 def meridian_side(altitude_deg: float, azimuth_deg: float, latitude_deg: float) -> str:

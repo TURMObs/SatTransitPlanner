@@ -406,7 +406,6 @@ class ObservingWindow(QWidget):
         )
         if offset is None:
             return None
-        delta_ra, delta_dec = offset
 
         grid = QGridLayout()
         grid.setHorizontalSpacing(14)
@@ -419,23 +418,28 @@ class ObservingWindow(QWidget):
 
         # The sign convention goes in the label, not a tooltip: nobody hovers
         # while copying two numbers into a mount at four in the morning.
-        for row, (name, value, note) in enumerate(
+        #
+        # Five decimals of an hour is 0.54" of right ascension, and four of a
+        # degree is 0.36" — finer either way than a mount will actually land.
+        rows = (
             (
-                (
-                    "\u0394 RA (east +)",
-                    delta_ra,
-                    f"{delta_ra * 60.0:+.2f}\u2032 of right ascension, "
-                    "already divided by cos(dec) so it can be added to an RA",
-                ),
-                ("\u0394 Dec (north +)", delta_dec, f"{delta_dec * 60.0:+.2f}\u2032 on the sky"),
+                "\u0394 RA (east +)",
+                f"{offset.ra_hours:+.5f}h",
+                f"{offset.ra_hours * 3600.0:+.2f} seconds of right ascension, "
+                "already divided by cos(dec) so it can be added to an RA",
             ),
-            start=1,
-        ):
+            (
+                "\u0394 Dec (north +)",
+                f"{offset.dec_deg:+.4f}\u00b0",
+                f"{offset.dec_deg * 60.0:+.2f}\u2032 on the sky",
+            ),
+        )
+        for row, (name, text, note) in enumerate(rows, start=1):
             label = QLabel(name)
             label.setObjectName("sname")
             # Fixed pitch so the two line up on the decimal point, and signed
             # always: a missing "+" reads as a typo when you are copying it out.
-            shown = QLabel(f"{value:+.4f}\u00b0")
+            shown = QLabel(text)
             shown.setObjectName("sval")
             shown.setFont(countdown_font(max(self.font().pointSize(), 9)))
             shown.setAlignment(Qt.AlignmentFlag.AlignRight)

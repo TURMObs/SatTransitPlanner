@@ -406,3 +406,25 @@ def test_an_event_without_geometry_does_not_crash_the_window(app):
     assert _offset_rows(window) == {}
     assert not window.grab().isNull()
     window.close()
+
+
+def test_right_ascension_is_shown_in_hours_and_declination_in_degrees(app):
+    # The two carry different units, so each value says which it is.
+    window = ObservingWindow(
+        THEMES["dark"], apply_theme(app, "dark"), TRANSIT, latitude_deg=DARMSTADT
+    )
+    rows = _offset_rows(window)
+    assert rows["Δ RA (east +)"].endswith("h")
+    assert rows["Δ Dec (north +)"].endswith("°")
+    window.close()
+
+
+def test_the_hour_offset_keeps_enough_decimals_to_be_worth_having(app):
+    # An hour of right ascension is 15 degrees, so a value in hours needs more
+    # decimal places than one in degrees to say the same thing.
+    window = ObservingWindow(
+        THEMES["dark"], apply_theme(app, "dark"), TRANSIT, latitude_deg=DARMSTADT
+    )
+    hours = _offset_rows(window)["Δ RA (east +)"]
+    assert len(hours.split(".")[1].rstrip("h")) >= 5
+    window.close()
