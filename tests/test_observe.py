@@ -313,3 +313,96 @@ def test_the_timeline_band_is_labelled_for_what_it_spans(app):
     view = TimelineView(THEMES["dark"])
     assert view._band_label(moments_of(TRANSIT)) == "transit"
     assert view._band_label(moments_of(NEAR_MISS)) == "closest"
+
+
+# --- the pointing offset -----------------------------------------------------
+
+DARMSTADT = 49.8775
+
+
+def _offset_rows(window) -> dict[str, str]:
+    """The offset labels and values, read off the built window."""
+    from PyQt6.QtWidgets import QLabel
+
+    texts = [w.text() for w in window.findChildren(QLabel)]
+    rows = {}
+    for index, text in enumerate(texts):
+        if text.startswith("Δ ") and index + 1 < len(texts):
+            rows[text] = texts[index + 1]
+    return rows
+
+
+def test_the_window_gives_the_slew_from_the_low_limb(app):
+    window = ObservingWindow(
+        THEMES["dark"], apply_theme(app, "dark"), TRANSIT, latitude_deg=DARMSTADT
+    )
+    rows = _offset_rows(window)
+    assert set(rows) == {"Δ RA (east +)", "Δ Dec (north +)"}
+    # 171.8" north of centre, so the slew from the south limb is that plus one
+    # radius: (171.8 + 943.8) / 3600.
+    assert rows["Δ Dec (north +)"] == "+0.3099°"
+    window.close()
+
+
+def test_the_signs_are_on_the_labels_not_hidden_in_a_tooltip(app):
+    # Nobody hovers while copying two numbers into a mount at four in the
+    # morning, and a sign error points the telescope at empty sky.
+    window = ObservingWindow(
+        THEMES["dark"], apply_theme(app, "dark"), TRANSIT, latitude_deg=DARMSTADT
+    )
+    assert "east +" in " ".join(_offset_rows(window))
+    assert "north +" in " ".join(_offset_rows(window))
+    window.close()
+
+
+def test_every_offset_is_shown_signed(app):
+    window = ObservingWindow(
+        THEMES["dark"], apply_theme(app, "dark"), TRANSIT, latitude_deg=DARMSTADT
+    )
+    assert all(v[0] in "+-" for v in _offset_rows(window).values())
+    window.close()
+
+
+def test_turning_the_view_over_measures_from_the_other_limb(app):
+    up, down = (
+        _offset_rows(
+            ObservingWindow(
+                THEMES["dark"],
+                apply_theme(app, "dark"),
+                TRANSIT,
+                latitude_deg=DARMSTADT,
+                north_is_down=flipped,
+            )
+        )
+        for flipped in (False, True)
+    )
+    assert up["Δ Dec (north +)"].startswith("+")
+    assert down["Δ Dec (north +)"].startswith("-")
+    # East-west does not care: the lowest point is below the centre either way.
+    assert up["Δ RA (east +)"] == down["Δ RA (east +)"]
+
+
+def test_without_a_latitude_there_is_no_offset_to_give(app):
+    # An older results file, or one from a site the report does not describe.
+    window = ObservingWindow(THEMES["dark"], apply_theme(app, "dark"), TRANSIT)
+    assert _offset_rows(window) == {}
+    assert not window.grab().isNull()
+    window.close()
+
+
+def test_a_near_miss_still_gets_an_offset(app):
+    # It has no chord, but its closest approach is still worth pointing at.
+    window = ObservingWindow(
+        THEMES["dark"], apply_theme(app, "dark"), NEAR_MISS, latitude_deg=DARMSTADT
+    )
+    assert _offset_rows(window)
+    window.close()
+
+
+def test_an_event_without_geometry_does_not_crash_the_window(app):
+    window = ObservingWindow(
+        THEMES["dark"], apply_theme(app, "dark"), {"satellite": {}}, latitude_deg=DARMSTADT
+    )
+    assert _offset_rows(window) == {}
+    assert not window.grab().isNull()
+    window.close()

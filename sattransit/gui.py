@@ -522,6 +522,10 @@ class DiskView(QWidget):
             fx, fy = -fx, -fy
         return fx, fy
 
+    def north_is_down(self) -> bool:
+        """Whether north is drawn towards the bottom of the pane."""
+        return self._flips[1] < 0
+
     def _side_of_meridian(self) -> str | None:
         """Which side of the meridian this event is on, if that can be known."""
         geometry = (self._event or {}).get("geometry") or {}
@@ -1413,6 +1417,10 @@ class ViewerWindow(QWidget):
             event,
             target=(self._report or {}).get("target", "sun"),
             lead_seconds=self._recording_lead_seconds,
+            latitude_deg=self._latitude(),
+            # The disk beside it is showing this same event, so it already knows
+            # which edge the flips and the meridian put at the bottom.
+            north_is_down=self._disk.north_is_down(),
         )
         # Several can be open at once, for back-to-back passes. Without a
         # reference they would be collected the moment this returns.

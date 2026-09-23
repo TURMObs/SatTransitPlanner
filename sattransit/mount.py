@@ -41,6 +41,60 @@ def hour_angle_deg(altitude_deg: float, azimuth_deg: float, latitude_deg: float)
     return math.degrees(math.atan2(y, x))
 
 
+def declination_deg(altitude_deg: float, azimuth_deg: float, latitude_deg: float) -> float:
+    """The target's declination, from the same rotation as the hour angle.
+
+    Needed to turn an east-west angle on the sky into degrees of right
+    ascension, which run 1/cos(dec) times faster.
+    """
+    altitude = math.radians(altitude_deg)
+    azimuth = math.radians(azimuth_deg)
+    latitude = math.radians(latitude_deg)
+
+    sine = (
+        math.sin(altitude) * math.sin(latitude)
+        + math.cos(altitude) * math.cos(latitude) * math.cos(azimuth)
+    )
+    return math.degrees(math.asin(max(-1.0, min(1.0, sine))))
+
+
+def pointing_offset(
+    separation_arcsec: float,
+    position_angle_deg: float,
+    radius_arcsec: float,
+    dec_deg: float,
+    north_is_down: bool,
+) -> tuple[float, float] | None:
+    """Offset in RA and Dec, in degrees, from the disk's lowest drawn point to
+    the track's mid-point.
+
+    At a long focal length the disk does not fit in the frame, so the limb is
+    the only landmark there is to start from: put the bottom edge of the disk
+    on the sensor, apply this, and the mid-point of the chord is centred.
+
+    "Lowest" means lowest *as drawn* — the flips and the meridian rotation are
+    already in it — so the screen and the camera agree about which edge to use.
+
+    The RA offset is a difference in right ascension, not an angle on the sky:
+    it carries the 1/cos(dec) factor already, so it can be added straight to a
+    right ascension.
+    """
+    if abs(dec_deg) > 89.9:  # cos(dec) vanishes and RA stops meaning anything
+        return None
+
+    angle = math.radians(position_angle_deg)
+    east = separation_arcsec * math.sin(angle)
+    north = separation_arcsec * math.cos(angle)
+
+    # The lowest drawn point lies one radius from the centre, towards whichever
+    # pole is being drawn downwards.
+    low_limb_north = radius_arcsec if north_is_down else -radius_arcsec
+
+    delta_dec = (north - low_limb_north) / 3600.0
+    delta_ra = east / 3600.0 / math.cos(math.radians(dec_deg))
+    return delta_ra, delta_dec
+
+
 def meridian_side(altitude_deg: float, azimuth_deg: float, latitude_deg: float) -> str:
     """``"east"`` while the target is still rising to the meridian, else ``"west"``."""
     return "east" if hour_angle_deg(altitude_deg, azimuth_deg, latitude_deg) < 0.0 else "west"

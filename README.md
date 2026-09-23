@@ -309,6 +309,27 @@ number you are watching for a cue jitters.
 Near misses never touch the disk, so they have no ingress: those count down to
 the closest approach instead, and say so.
 
+**The slew offsets** at the bottom are for a long focal length, where the disk
+does not fit in the frame and there is nothing to aim by but an edge of it. Put
+the lowest edge of the disk on the sensor, apply the two offsets, and the middle
+of the chord is centred. They are plain decimal degrees, selectable, for typing
+or pasting into something like SharpCap.
+
+| | |
+| --- | --- |
+| `Δ RA (east +)` | a difference in **right ascension**, not an angle on the sky: the 1/cos(dec) factor is already in it, so it can be added straight to an RA |
+| `Δ Dec (north +)` | an angle on the sky, north positive |
+
+"Lowest" means lowest *as drawn* — the flips and the meridian rotation are
+already in it — so the disk view, the camera and these numbers all agree about
+which edge to start from. Turn the view over and the reference moves to the
+other limb, which flips the sign of `Δ Dec`; `Δ RA` does not change, because the
+lowest point of a disk is directly below its centre either way. Hovering a value
+shows it in arcminutes.
+
+The offsets need the observatory's latitude, which comes from the results file,
+so a file written before it was recorded simply shows no offsets.
+
 The element age is shown because it is the honest limit on all of this — the
 arithmetic is good to a millisecond, but a week-old element set is not. The
 clock is your computer's, so keep it synchronised if you care about the tenths.

@@ -2,7 +2,14 @@
 
 import pytest
 
-from sattransit.mount import describe, hour_angle_deg, is_turned_over, meridian_side
+from sattransit.mount import (
+    declination_deg,
+    describe,
+    hour_angle_deg,
+    is_turned_over,
+    meridian_side,
+    pointing_offset,
+)
 
 DARMSTADT = 49.8775
 SYDNEY = -33.87
@@ -97,3 +104,79 @@ def test_the_hour_angle_reads_as_hours_and_minutes():
 
 def test_on_the_meridian_reads_as_zero():
     assert describe(0.0).startswith("0h 00m")
+
+
+# --- declination --------------------------------------------------------------
+
+
+def test_the_zenith_sits_at_the_observer_s_latitude():
+    assert declination_deg(90.0, 0.0, DARMSTADT) == pytest.approx(DARMSTADT, abs=1e-9)
+
+
+def test_on_the_meridian_declination_follows_the_altitude():
+    # Due south at altitude a, a northern observer sees dec = a + lat - 90.
+    for altitude in (20.0, 45.0, 60.0):
+        assert declination_deg(altitude, 180.0, DARMSTADT) == pytest.approx(
+            altitude + DARMSTADT - 90.0, abs=1e-9
+        )
+
+
+def test_declination_matches_an_independent_calculation():
+    # The Sun from Darmstadt, 2026-06-15 12:00 UTC: Skyfield's altaz() in,
+    # its own hadec() declination out.
+    assert declination_deg(62.6200, 197.2186, 49.8728) == pytest.approx(23.3190, abs=0.002)
+
+
+# --- the pointing offset ------------------------------------------------------
+
+RADIUS = 960.0  # a round solar radius, in arcseconds
+
+
+def test_a_centred_track_is_one_radius_above_the_low_limb():
+    offset = pointing_offset(0.0, 0.0, RADIUS, 0.0, north_is_down=False)
+    assert offset == (pytest.approx(0.0), pytest.approx(RADIUS / 3600.0))
+
+
+def test_turning_the_view_over_moves_the_reference_to_the_other_limb():
+    # The lowest thing on screen is now the north edge, so the slew is southwards.
+    _, delta_dec = pointing_offset(0.0, 0.0, RADIUS, 0.0, north_is_down=True)
+    assert delta_dec == pytest.approx(-RADIUS / 3600.0)
+
+
+def test_a_track_across_the_top_of_the_disk_is_two_radii_up():
+    # Position angle 0 is due north, so this grazes the far limb.
+    _, delta_dec = pointing_offset(RADIUS, 0.0, RADIUS, 0.0, north_is_down=False)
+    assert delta_dec == pytest.approx(2 * RADIUS / 3600.0)
+
+
+def test_the_east_west_offset_does_not_care_which_way_up_the_view_is():
+    # The lowest point of a disk is directly below its centre either way.
+    up = pointing_offset(500.0, 90.0, RADIUS, 20.0, north_is_down=False)
+    down = pointing_offset(500.0, 90.0, RADIUS, 20.0, north_is_down=True)
+    assert up[0] == pytest.approx(down[0])
+
+
+def test_position_angle_ninety_is_due_east():
+    delta_ra, delta_dec = pointing_offset(600.0, 90.0, RADIUS, 0.0, north_is_down=False)
+    assert delta_ra > 0  # east is increasing right ascension
+    assert delta_dec == pytest.approx(RADIUS / 3600.0)  # no north-south component
+
+
+def test_the_ra_offset_carries_the_cosine_of_the_declination():
+    """Degrees of RA, not an angle on the sky.
+
+    A mount given an RA to move to needs the coordinate difference, which runs
+    1/cos(dec) times faster than the angle subtended.
+    """
+    import math
+
+    on_sky = 600.0 / 3600.0
+    for dec in (0.0, 23.4, -23.4):
+        delta_ra, _ = pointing_offset(600.0, 90.0, RADIUS, dec, north_is_down=False)
+        assert delta_ra == pytest.approx(on_sky / math.cos(math.radians(dec)))
+
+
+def test_near_the_pole_there_is_no_answer_to_give():
+    # cos(dec) vanishes and right ascension stops meaning anything. Cannot
+    # happen for the Sun or Moon, but better than dividing by nearly zero.
+    assert pointing_offset(100.0, 0.0, RADIUS, 89.95, north_is_down=False) is None

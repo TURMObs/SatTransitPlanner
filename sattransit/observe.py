@@ -28,6 +28,8 @@ from PyQt6.QtGui import (
 )
 from PyQt6.QtWidgets import QFrame, QGridLayout, QLabel, QVBoxLayout, QWidget
 
+from .mount import declination_deg, pointing_offset
+
 # The countdown ticks at this rate: fast enough to show tenths smoothly,
 # far too slow to matter for the CPU.
 TICK_MS = 100
@@ -292,10 +294,15 @@ class ObservingWindow(QWidget):
     """Live countdown and timeline for one event."""
 
     def __init__(self, theme: dict, stylesheet: str, event: dict, target: str = "sun",
-                 now_provider=None, lead_seconds: float = RECORDING_LEAD_SECONDS):
+                 now_provider=None, lead_seconds: float = RECORDING_LEAD_SECONDS,
+                 latitude_deg: float | None = None, north_is_down: bool = False):
         super().__init__()
         self._theme = theme
         self._event = event
+        # For the pointing offset: the latitude fixes the declination, and the
+        # flip says which edge of the disk is the one at the bottom of the frame.
+        self._latitude_deg = latitude_deg
+        self._north_is_down = north_is_down
         self._moments = moments_of(event)
         self._lead_seconds = lead_seconds
         # Injectable so the display can be tested, and screenshotted, at any
@@ -364,7 +371,79 @@ class ObservingWindow(QWidget):
         root.addWidget(line)
 
         root.addLayout(self._build_times(event))
+
+        offsets = self._build_offsets(event)
+        if offsets is not None:
+            rule = QFrame()
+            rule.setObjectName("hr")
+            rule.setFrameShape(QFrame.Shape.HLine)
+            root.addWidget(rule)
+            root.addLayout(offsets)
         root.addStretch(1)
+
+    def _build_offsets(self, event: dict):
+        """Where to slew, starting from the one landmark a long focal length has.
+
+        At 3.5 m the disk does not fit in the frame, so the whole disk is not
+        available to aim by. Its lowest edge is: put that on the sensor, apply
+        these two, and the middle of the chord is centred.
+        """
+        geometry = event.get("geometry") or {}
+        approach = event.get("closest_approach") or {}
+        altitude = geometry.get("target_altitude_deg")
+        azimuth = geometry.get("target_azimuth_deg")
+        radius = approach.get("target_radius_arcsec")
+        if self._latitude_deg is None or altitude is None or azimuth is None or radius is None:
+            return None
+
+        dec = declination_deg(altitude, azimuth, self._latitude_deg)
+        offset = pointing_offset(
+            approach.get("separation_arcsec", 0.0),
+            approach.get("position_angle_deg", 0.0),
+            radius,
+            dec,
+            self._north_is_down,
+        )
+        if offset is None:
+            return None
+        delta_ra, delta_dec = offset
+
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(14)
+        grid.setVerticalSpacing(2)
+        grid.setColumnStretch(1, 1)
+
+        caption = QLabel("Slew to the track centre, from the disk's lowest edge")
+        caption.setObjectName("sname")
+        grid.addWidget(caption, 0, 0, 1, 3)
+
+        # The sign convention goes in the label, not a tooltip: nobody hovers
+        # while copying two numbers into a mount at four in the morning.
+        for row, (name, value, note) in enumerate(
+            (
+                (
+                    "\u0394 RA (east +)",
+                    delta_ra,
+                    f"{delta_ra * 60.0:+.2f}\u2032 of right ascension, "
+                    "already divided by cos(dec) so it can be added to an RA",
+                ),
+                ("\u0394 Dec (north +)", delta_dec, f"{delta_dec * 60.0:+.2f}\u2032 on the sky"),
+            ),
+            start=1,
+        ):
+            label = QLabel(name)
+            label.setObjectName("sname")
+            # Fixed pitch so the two line up on the decimal point, and signed
+            # always: a missing "+" reads as a typo when you are copying it out.
+            shown = QLabel(f"{value:+.4f}\u00b0")
+            shown.setObjectName("sval")
+            shown.setFont(countdown_font(max(self.font().pointSize(), 9)))
+            shown.setAlignment(Qt.AlignmentFlag.AlignRight)
+            shown.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            shown.setToolTip(note)
+            grid.addWidget(label, row, 0)
+            grid.addWidget(shown, row, 1)
+        return grid
 
     def _build_times(self, event: dict):
         """The times, local and UTC side by side, in the order they happen."""
